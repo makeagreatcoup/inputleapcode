@@ -50,8 +50,19 @@ class InputCapture extends EventEmitter {
 
   async requestMacPermissions() {
     // macOS需要辅助功能权限
-    // 这里可以添加权限检查和请求逻辑
     console.log('检查macOS辅助功能权限...');
+    try {
+      const { execSync } = require('child_process');
+      // 尝试测试权限
+      execSync('osascript -e \'tell application "System Events" to get the position of the mouse\'', { encoding: 'utf8' });
+      console.log('macOS辅助功能权限检查通过');
+    } catch (error) {
+      console.error('macOS辅助功能权限检查失败:', error);
+      console.log('请手动授予应用辅助功能权限：');
+      console.log('1. 打开系统偏好设置 > 安全性与隐私 > 隐私');
+      console.log('2. 选择"辅助功能"');
+      console.log('3. 添加并勾选您的应用');
+    }
   }
 
   startMouseCapture() {
@@ -175,7 +186,28 @@ class InputCapture extends EventEmitter {
 
   getScreenBounds() {
     try {
-      // 默认屏幕尺寸，实际应用中应获取真实屏幕尺寸
+      if (this.platform === 'darwin') {
+        // macOS获取真实屏幕尺寸
+        const { execSync } = require('child_process');
+        const result = execSync('osascript -e \'tell application "Finder" to get the bounds of the window of the desktop\'', { encoding: 'utf8' });
+        const match = result.match(/(\d+),\s*(\d+),\s*(\d+),\s*(\d+)/);
+        if (match) {
+          const left = parseInt(match[1]);
+          const top = parseInt(match[2]);
+          const right = parseInt(match[3]);
+          const bottom = parseInt(match[4]);
+          return {
+            width: right - left,
+            height: bottom - top,
+            left: left,
+            top: top,
+            right: right,
+            bottom: bottom
+          };
+        }
+      }
+      
+      // 默认屏幕尺寸
       return {
         width: 1920,
         height: 1080,
@@ -294,9 +326,22 @@ class InputCapture extends EventEmitter {
         });
         
       } else if (this.platform === 'darwin') {
-        // macOS使用AppleScript移动鼠标（简化版本）
+        // macOS使用AppleScript移动鼠标
         const { execSync } = require('child_process');
-        execSync(`osascript -e 'tell application "System Events" to set the position of the mouse to {${x}, ${y}}'`, { encoding: 'utf8' });
+        try {
+          execSync(`osascript -e 'tell application "System Events" to set the position of the mouse to {${x}, ${y}}'`, { encoding: 'utf8' });
+          console.log(`macOS鼠标移动到 (${x}, ${y}) 完成`);
+        } catch (error) {
+          console.error('macOS鼠标移动失败:', error);
+          console.log('提示：请确保已授予应用辅助功能权限');
+          // 尝试使用备用方法
+          try {
+            execSync(`cliclick c:${x},${y}`, { encoding: 'utf8' });
+            console.log(`使用cliclick备用方法移动鼠标到 (${x}, ${y})`);
+          } catch (fallbackError) {
+            console.error('备用鼠标移动方法也失败:', fallbackError);
+          }
+        }
       }
     } catch (error) {
       console.error('移动鼠标失败:', error);
