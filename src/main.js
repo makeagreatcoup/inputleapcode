@@ -3,6 +3,16 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
+// 修复Windows中文乱码问题
+if (process.platform === 'win32') {
+  process.env.PYTHONIOENCODING = 'utf-8';
+  process.env.LANG = 'zh_CN.UTF-8';
+  // 设置控制台编码
+  if (process.stdout) {
+    process.stdout.write('\x1b[?25h'); // 显示光标
+  }
+}
+
 // 导入核心模块
 const NetworkManager = require('./modules/NetworkManager');
 const InputCapture = require('./modules/InputCapture');
