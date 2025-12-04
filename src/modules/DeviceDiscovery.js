@@ -28,7 +28,7 @@ class DeviceDiscovery extends EventEmitter {
       this.servicePort = port;
       
       // 简化版服务公告
-      console.log(`设备发现服务已启动: ${this.deviceName}`);
+      console.log(`Device discovery service started: ${this.deviceName}`);
       this.emit('announcement-started', {
         name: this.deviceName,
         port: port,
@@ -59,7 +59,7 @@ class DeviceDiscovery extends EventEmitter {
       this.discoveredDevices.clear();
       
       // 简化版设备发现（模拟）
-      console.log('开始设备发现...');
+      console.log('Starting device discovery...');
       
       // 模拟发现设备
       const mockDevices = [
@@ -109,13 +109,13 @@ class DeviceDiscovery extends EventEmitter {
       return await discoveryPromise;
       
     } catch (error) {
-      console.error('设备发现失败:', error);
+      console.error('Device discovery failed:', error);
       return [];
     }
   }
 
   stopDiscovery() {
-    console.log('停止设备发现');
+    console.log('Stopping device discovery');
     this.emit('discovery-stopped');
   }
 
@@ -125,7 +125,7 @@ class DeviceDiscovery extends EventEmitter {
       this.announcementInterval = null;
     }
     
-    console.log('停止设备公告');
+    console.log('Stopping device announcement');
     this.emit('announcement-stopped');
   }
 

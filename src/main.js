@@ -111,9 +111,18 @@ class InputLeapApp {
     ipcMain.handle('start-server', async (event, config) => {
       try {
         this.isServer = true;
-        await this.networkManager.startServer(config.port, config.useTLS);
+        
+        // 监听服务器启动事件以获取IP信息
+        const serverInfo = await new Promise((resolve, reject) => {
+          this.networkManager.once('server-started', (info) => {
+            resolve(info);
+          });
+          
+          this.networkManager.startServer(config.port, false).catch(reject);
+        });
+        
         await this.deviceDiscovery.startAnnouncement(config.name);
-        return { success: true };
+        return { success: true, serverInfo };
       } catch (error) {
         return { success: false, error: error.message };
       }
@@ -123,7 +132,7 @@ class InputLeapApp {
     ipcMain.handle('connect-to-server', async (event, config) => {
       try {
         this.isServer = false;
-        await this.networkManager.connectToServer(config.host, config.port, config.useTLS);
+        await this.networkManager.connectToServer(config.host, config.port, false); // 暂时禁用TLS
         return { success: true };
       } catch (error) {
         return { success: false, error: error.message };

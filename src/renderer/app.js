@@ -139,7 +139,19 @@ class InputLeapUI {
         this.updateConnectionStatus('connected');
         this.startServerBtnEl.classList.add('d-none');
         this.stopServerBtnEl.classList.remove('d-none');
-        this.showNotification('服务器已启动', 'success');
+        
+        // 显示IP地址信息
+        if (result.serverInfo && result.serverInfo.ips) {
+          const serverIPsEl = document.getElementById('serverIPs');
+          let ipHTML = '<strong>可用IP地址:</strong><br>';
+          for (const [interfaceName, addresses] of Object.entries(result.serverInfo.ips)) {
+            ipHTML += `<div><strong>${interfaceName}:</strong> ${addresses.map(ip => `<code>${ip}</code>`).join(', ')}</div>`;
+          }
+          serverIPsEl.innerHTML = ipHTML;
+          this.showNotification('服务器已启动', 'success');
+        } else {
+          this.showNotification('服务器已启动', 'success');
+        }
       } else {
         this.updateConnectionStatus('disconnected');
         this.showNotification(`启动服务器失败: ${result.error}`, 'error');
@@ -156,6 +168,11 @@ class InputLeapUI {
       this.updateConnectionStatus('disconnected');
       this.startServerBtnEl.classList.remove('d-none');
       this.stopServerBtnEl.classList.add('d-none');
+      
+      // 清空IP地址显示
+      const serverIPsEl = document.getElementById('serverIPs');
+      serverIPsEl.innerHTML = '<small class="text-muted">启动服务器后将显示可用IP地址</small>';
+      
       this.showNotification('服务器已停止', 'info');
     } catch (error) {
       this.showNotification(`停止服务器失败: ${error.message}`, 'error');
