@@ -278,7 +278,7 @@ class InputCapture extends EventEmitter {
       } else if (this.platform === 'darwin') {
         // macOS使用AppleScript移动鼠标（简化版本）
         const { execSync } = require('child_process');
-        execSync(`osascript -e 'tell application "System Events" to set the position of the mouse to ${x}, ${y}'`, { encoding: 'utf8' });
+        execSync(`osascript -e 'tell application "System Events" to set the position of the mouse to {${x}, ${y}}'`, { encoding: 'utf8' });
       }
     } catch (error) {
       console.error('移动鼠标失败:', error);
