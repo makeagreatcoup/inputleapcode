@@ -4,8 +4,8 @@
   "description": "跨平台键鼠共享系统 - 支持Windows和Mac之间的键鼠共享、剪贴板同步和文件传输",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
+    "start": "node start.js",
+    "dev": "node start.js --dev",
     "start:win": "cmd /c \"chcp 65001 >nul && electron .\"",
     "dev:win": "cmd /c \"chcp 65001 >nul && electron . --dev\"",
     "build": "electron-builder",
