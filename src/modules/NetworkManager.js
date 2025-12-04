@@ -20,15 +20,42 @@ class NetworkManager extends EventEmitter {
     return new Promise((resolve, reject) => {
       if (useTLS) {
         // 生成自签名证书
-        const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+        const { privateKey } = crypto.generateKeyPairSync('rsa', {
           modulusLength: 2048,
-          publicKeyEncoding: { type: 'spki', format: 'pem' },
           privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
         });
 
+        // 创建自签名证书
+        const cert = crypto.createSelfSignedCertificate({
+          key: privateKey,
+          days: 365,
+          algorithm: 'sha256',
+          extensions: [{
+            name: 'basicConstraints',
+            ca: true,
+            critical: true
+          }, {
+            name: 'keyUsage',
+            keyCertSign: true,
+            digitalSignature: true,
+            nonRepudiation: true,
+            keyEncipherment: true,
+            dataEncipherment: true
+          }, {
+            name: 'extKeyUsage',
+            serverAuth: true,
+            clientAuth: true
+          }]
+        });
+
+        // 验证证书格式
+        if (!privateKey || !cert) {
+          throw new Error('证书生成失败');
+        }
+
         const options = {
           key: privateKey,
-          cert: publicKey,
+          cert: cert,
           rejectUnauthorized: false
         };
 
