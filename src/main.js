@@ -77,31 +77,55 @@ class InputLeapApp {
 
     // 接收远程鼠标移动事件
     this.networkManager.on('mouse-move', (data) => {
-      console.log(`接收到远程鼠标移动事件: (${data.x}, ${data.y}), 边缘: ${data.edge}`);
+      console.log(`[客户端] 接收到远程鼠标移动事件: (${data.x}, ${data.y}), 边缘: ${data.edge}`);
       
-      // 计算在本地屏幕的对应位置
-      const localBounds = this.inputCapture.screenBounds;
-      let targetX = data.x;
-      let targetY = data.y;
-      
-      // 根据边缘调整位置
-      switch (data.edge) {
-        case 'left':
-          targetX = localBounds.right - 50; // 从右边缘进入
-          break;
-        case 'right':
-          targetX = localBounds.left + 50; // 从左边缘进入
-          break;
-        case 'top':
-          targetY = localBounds.bottom - 50; // 从下边缘进入
-          break;
-        case 'bottom':
-          targetY = localBounds.top + 50; // 从上边缘进入
-          break;
+      try {
+        // 计算在本地屏幕的对应位置
+        const localBounds = this.inputCapture.screenBounds;
+        console.log(`[客户端] 本地屏幕边界:`, localBounds);
+        
+        let targetX = data.x;
+        let targetY = data.y;
+        
+        // 根据边缘调整位置
+        switch (data.edge) {
+          case 'left':
+            targetX = localBounds.right - 50; // 从右边缘进入
+            console.log(`[客户端] 左边缘进入，目标X坐标: ${targetX}`);
+            break;
+          case 'right':
+            targetX = localBounds.left + 50; // 从左边缘进入
+            console.log(`[客户端] 右边缘进入，目标X坐标: ${targetX}`);
+            break;
+          case 'top':
+            targetY = localBounds.bottom - 50; // 从下边缘进入
+            console.log(`[客户端] 上边缘进入，目标Y坐标: ${targetY}`);
+            break;
+          case 'bottom':
+            targetY = localBounds.top + 50; // 从上边缘进入
+            console.log(`[客户端] 下边缘进入，目标Y坐标: ${targetY}`);
+            break;
+          default:
+            console.warn(`[客户端] 未知边缘: ${data.edge}`);
+            return;
+        }
+        
+        console.log(`[客户端] 准备移动鼠标到本地位置: (${targetX}, ${targetY})`);
+        
+        // 添加移动完成回调
+        const moveResult = this.inputCapture.moveMouseTo(targetX, targetY);
+        if (moveResult instanceof Promise) {
+          moveResult.then(() => {
+            console.log(`[客户端] 鼠标移动完成: (${targetX}, ${targetY})`);
+          }).catch((error) => {
+            console.error(`[客户端] 鼠标移动失败:`, error);
+          });
+        } else {
+          console.log(`[客户端] 鼠标移动指令已发送: (${targetX}, ${targetY})`);
+        }
+      } catch (error) {
+        console.error(`[客户端] 处理鼠标移动事件时出错:`, error);
       }
-      
-      console.log(`移动鼠标到本地位置: (${targetX}, ${targetY})`);
-      this.inputCapture.moveMouseTo(targetX, targetY);
     });
 
     // 接收远程鼠标点击事件

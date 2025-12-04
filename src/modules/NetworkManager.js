@@ -11,6 +11,20 @@ class NetworkManager extends EventEmitter {
     this.connections = new Map();
     this.isSecure = false;
     this.port = 24800; // 默认端口，类似Synergy
+    
+    // 事件优先级队列
+    this.eventQueue = [];
+    this.isProcessingQueue = false;
+    this.eventPriorities = {
+      'mouse-move': 1,      // 最高优先级
+      'mouse-click': 1,
+      'key-press': 1,
+      'clipboard-change': 2, // 中等优先级
+      'file-transfer-start': 3,
+      'file-transfer-data': 3,
+      'file-transfer-end': 3,
+      'handshake': 4        // 最低优先级
+    };
   }
 
   async startServer(port = 24800, useTLS = true) {
@@ -206,43 +220,84 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
   }
 
   processMessage(connectionId, message) {
-    switch (message.type) {
-      case 'handshake':
-        this.emit('handshake', connectionId, message);
-        break;
-        
-      case 'mouse-move':
-        console.log('NetworkManager: 处理mouse-move事件:', message.data);
-        this.emit('mouse-move', message.data);
-        break;
-        
-      case 'mouse-click':
-        this.emit('mouse-click', message.data);
-        break;
-        
-      case 'key-press':
-        this.emit('key-press', message.data);
-        break;
-        
-      case 'clipboard-change':
-        this.emit('clipboard-change', message.data);
-        break;
-        
-      case 'file-transfer-start':
-        this.emit('file-transfer-start', message.data);
-        break;
-        
-      case 'file-transfer-data':
-        this.emit('file-transfer-data', message.data);
-        break;
-        
-      case 'file-transfer-end':
-        this.emit('file-transfer-end', message.data);
-        break;
-        
-      default:
-        console.log('未知消息类型:', message.type);
+    // 将消息加入优先级队列
+    const priority = this.eventPriorities[message.type] || 999;
+    this.eventQueue.push({
+      connectionId,
+      message,
+      priority,
+      timestamp: Date.now()
+    });
+    
+    // 按优先级排序
+    this.eventQueue.sort((a, b) => a.priority - b.priority);
+    
+    // 开始处理队列
+    this.processEventQueue();
+  }
+
+  async processEventQueue() {
+    if (this.isProcessingQueue || this.eventQueue.length === 0) {
+      return;
     }
+    
+    this.isProcessingQueue = true;
+    
+    while (this.eventQueue.length > 0) {
+      const event = this.eventQueue.shift();
+      
+      try {
+        switch (event.message.type) {
+          case 'handshake':
+            this.emit('handshake', event.connectionId, event.message);
+            break;
+            
+          case 'mouse-move':
+            console.log('NetworkManager: 处理mouse-move事件:', event.message.data);
+            this.emit('mouse-move', event.message.data);
+            // 鼠标事件后稍作延迟，确保处理完成
+            await new Promise(resolve => setTimeout(resolve, 10));
+            break;
+            
+          case 'mouse-click':
+            this.emit('mouse-click', event.message.data);
+            await new Promise(resolve => setTimeout(resolve, 10));
+            break;
+            
+          case 'key-press':
+            this.emit('key-press', event.message.data);
+            await new Promise(resolve => setTimeout(resolve, 10));
+            break;
+            
+          case 'clipboard-change':
+            // 剪贴板事件去重：如果队列中还有剪贴板事件，跳过当前的
+            const hasMoreClipboard = this.eventQueue.some(e => e.message.type === 'clipboard-change');
+            if (!hasMoreClipboard) {
+              this.emit('clipboard-change', event.message.data);
+            }
+            break;
+            
+          case 'file-transfer-start':
+            this.emit('file-transfer-start', event.message.data);
+            break;
+            
+          case 'file-transfer-data':
+            this.emit('file-transfer-data', event.message.data);
+            break;
+            
+          case 'file-transfer-end':
+            this.emit('file-transfer-end', event.message.data);
+            break;
+            
+          default:
+            console.log('未知消息类型:', event.message.type);
+        }
+      } catch (error) {
+        console.error('处理事件时出错:', error);
+      }
+    }
+    
+    this.isProcessingQueue = false;
   }
 
   sendMessage(connectionId, message) {

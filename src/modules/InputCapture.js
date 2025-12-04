@@ -280,72 +280,87 @@ class InputCapture extends EventEmitter {
 
   // 移动鼠标到指定位置
   moveMouseTo(x, y) {
-    try {
-      // 设置远程移动标志，防止循环
-      this.isRemoteMoving = true;
-      
-      // 清除之前的超时
-      if (this.remoteMoveTimeout) {
-        clearTimeout(this.remoteMoveTimeout);
-      }
-      
-      // 500ms后清除远程移动标志
-      this.remoteMoveTimeout = setTimeout(() => {
-        this.isRemoteMoving = false;
-      }, 500);
-      
-      console.log(`准备移动鼠标到位置: (${x}, ${y})`);
-      
-      if (this.platform === 'win32') {
-        // Windows使用PowerShell移动鼠标，先加载程序集，修复中文乱码问题
-        const { spawn } = require('child_process');
-        const psCommand = `powershell -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})"`;
+    return new Promise((resolve, reject) => {
+      try {
+        // 设置远程移动标志，防止循环
+        this.isRemoteMoving = true;
         
-        // 使用spawn替代execSync，避免阻塞
-        const child = spawn('powershell', ['-Command', psCommand], {
-          stdio: 'pipe',
-          shell: true,
-          encoding: 'utf8',
-          env: {
-            ...process.env,
-            PYTHONIOENCODING: 'utf-8',
-            LANG: 'zh_CN.UTF-8'
-          }
-        });
-        
-        child.on('error', (error) => {
-          console.error('PowerShell进程错误:', error);
-        });
-        
-        child.on('close', (code) => {
-          if (code === 0) {
-            console.log(`鼠标移动到 (${x}, ${y}) 完成`);
-          } else {
-            console.error(`鼠标移动失败，退出码: ${code}`);
-          }
-        });
-        
-      } else if (this.platform === 'darwin') {
-        // macOS使用AppleScript移动鼠标
-        const { execSync } = require('child_process');
-        try {
-          execSync(`osascript -e 'tell application "System Events" to set the position of the mouse to {${x}, ${y}}'`, { encoding: 'utf8' });
-          console.log(`macOS鼠标移动到 (${x}, ${y}) 完成`);
-        } catch (error) {
-          console.error('macOS鼠标移动失败:', error);
-          console.log('提示：请确保已授予应用辅助功能权限');
-          // 尝试使用备用方法
-          try {
-            execSync(`cliclick c:${x},${y}`, { encoding: 'utf8' });
-            console.log(`使用cliclick备用方法移动鼠标到 (${x}, ${y})`);
-          } catch (fallbackError) {
-            console.error('备用鼠标移动方法也失败:', fallbackError);
-          }
+        // 清除之前的超时
+        if (this.remoteMoveTimeout) {
+          clearTimeout(this.remoteMoveTimeout);
         }
+        
+        // 500ms后清除远程移动标志
+        this.remoteMoveTimeout = setTimeout(() => {
+          this.isRemoteMoving = false;
+        }, 500);
+        
+        console.log(`[InputCapture] 准备移动鼠标到位置: (${x}, ${y})`);
+        
+        if (this.platform === 'win32') {
+          // Windows使用PowerShell移动鼠标
+          const { spawn } = require('child_process');
+          const psCommand = `powershell -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})"`;
+          
+          const child = spawn('powershell', ['-Command', psCommand], {
+            stdio: 'pipe',
+            shell: true,
+            encoding: 'utf8',
+            env: {
+              ...process.env,
+              PYTHONIOENCODING: 'utf-8',
+              LANG: 'zh_CN.UTF-8'
+            }
+          });
+          
+          child.on('error', (error) => {
+            console.error('[InputCapture] PowerShell进程错误:', error);
+            reject(error);
+          });
+          
+          child.on('close', (code) => {
+            if (code === 0) {
+              console.log(`[InputCapture] Windows鼠标移动到 (${x}, ${y}) 完成`);
+              resolve();
+            } else {
+              console.error(`[InputCapture] Windows鼠标移动失败，退出码: ${code}`);
+              reject(new Error(`PowerShell退出码: ${code}`));
+            }
+          });
+          
+        } else if (this.platform === 'darwin') {
+          // macOS使用AppleScript移动鼠标
+          const { execSync } = require('child_process');
+          try {
+            console.log(`[InputCapture] 尝试使用AppleScript移动鼠标到 (${x}, ${y})`);
+            execSync(`osascript -e 'tell application "System Events" to set the position of the mouse to {${x}, ${y}}'`, { encoding: 'utf8' });
+            console.log(`[InputCapture] macOS鼠标移动到 (${x}, ${y}) 完成`);
+            resolve();
+          } catch (error) {
+            console.error('[InputCapture] macOS AppleScript鼠标移动失败:', error);
+            console.log('[InputCapture] 提示：请确保已授予应用辅助功能权限');
+            
+            // 尝试使用备用方法
+            try {
+              console.log(`[InputCapture] 尝试使用cliclick备用方法移动鼠标到 (${x}, ${y})`);
+              execSync(`cliclick c:${x},${y}`, { encoding: 'utf8' });
+              console.log(`[InputCapture] 使用cliclick备用方法移动鼠标到 (${x}, ${y}) 完成`);
+              resolve();
+            } catch (fallbackError) {
+              console.error('[InputCapture] 备用鼠标移动方法也失败:', fallbackError);
+              reject(fallbackError);
+            }
+          }
+        } else {
+          // 其他平台
+          console.log(`[InputCapture] 平台 ${this.platform} 暂不支持鼠标移动`);
+          resolve();
+        }
+      } catch (error) {
+        console.error('[InputCapture] 移动鼠标失败:', error);
+        reject(error);
       }
-    } catch (error) {
-      console.error('移动鼠标失败:', error);
-    }
+    });
   }
 
   // 模拟键盘按键

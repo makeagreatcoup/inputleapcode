@@ -18,6 +18,11 @@ class ClipboardSync extends EventEmitter {
     // 支持的剪贴板格式
     this.supportedFormats = ['text', 'image', 'files'];
     
+    // 剪贴板事件控制
+    this.lastEventTime = 0;
+    this.minEventInterval = 1000; // 最小事件间隔1秒
+    this.isRemoteUpdating = false; // 防止远程更新触发本地事件
+    
     this.initializeMonitoring();
   }
 
@@ -54,10 +59,22 @@ class ClipboardSync extends EventEmitter {
 
   async checkClipboardChange() {
     try {
+      // 如果正在远程更新，跳过检查
+      if (this.isRemoteUpdating) {
+        return;
+      }
+      
+      // 检查事件间隔，防止过于频繁的事件
+      const now = Date.now();
+      if (now - this.lastEventTime < this.minEventInterval) {
+        return;
+      }
+      
       const currentContent = await this.getClipboardContent();
       
       if (this.hasContentChanged(currentContent)) {
         this.lastClipboardContent = currentContent;
+        this.lastEventTime = now;
         this.emit('clipboard-change', currentContent);
       }
     } catch (error) {
@@ -91,9 +108,10 @@ class ClipboardSync extends EventEmitter {
       // 简化版剪贴板内容获取
       // 实际应用中应使用clipboard库
       
-      // 模拟文本内容
-      const mockText = '示例剪贴板内容 ' + Date.now();
-      if (Math.random() > 0.8) { // 20%概率返回内容
+      // 只在实际有剪贴板变化时返回内容，避免随机生成
+      if (this.lastClipboardContent === null && Math.random() > 0.8) {
+        // 初始化时偶尔返回内容
+        const mockText = '示例剪贴板内容 ' + Date.now();
         return {
           type: 'text',
           data: mockText,
@@ -101,6 +119,7 @@ class ClipboardSync extends EventEmitter {
         };
       }
       
+      // 正常情况下返回null，表示没有变化
       return null;
     } catch (error) {
       console.error('获取剪贴板内容失败:', error);
@@ -172,6 +191,9 @@ class ClipboardSync extends EventEmitter {
 
   async setClipboardContent(content) {
     try {
+      // 设置远程更新标志，防止触发本地事件
+      this.isRemoteUpdating = true;
+      
       console.log(`设置剪贴板内容: ${content.type}`);
       // 简化版剪贴板设置
       // 实际应用中应使用clipboard库
@@ -192,8 +214,22 @@ class ClipboardSync extends EventEmitter {
         default:
           console.warn('不支持的剪贴板内容类型:', content.type);
       }
+      
+      // 更新最后内容，防止重复发送
+      this.lastClipboardContent = {
+        type: content.type,
+        data: content.data,
+        timestamp: Date.now()
+      };
+      
+      // 延迟清除远程更新标志
+      setTimeout(() => {
+        this.isRemoteUpdating = false;
+      }, 500);
+      
     } catch (error) {
       console.error('设置剪贴板内容失败:', error);
+      this.isRemoteUpdating = false;
     }
   }
 
