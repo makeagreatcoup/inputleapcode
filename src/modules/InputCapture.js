@@ -125,14 +125,32 @@ class InputCapture extends EventEmitter {
         }
 
       } else if (this.platform === 'darwin') {
-        // macOS使用CGEvent获取鼠标位置
-        const result = execSync('python3 -c "from Quartz import CGEventGetLocation; from AppKit import NSEvent; print(CGEventGetLocation(NSEvent.mouseEvent()))"', { encoding: 'utf8' });
-        const match = result.match(/(\d+)\.(\d+)/);
-        if (match) {
-          return {
-            x: Math.floor(parseFloat(match[1] + '.' + match[2])),
-            y: Math.floor(parseFloat(match[3] + '.' + match[4] || '0'))
-          };
+        // macOS使用AppleScript获取鼠标位置
+        try {
+          const result = execSync('osascript -e \'tell application "System Events" to get the position of the mouse\'', { encoding: 'utf8' });
+          const match = result.match(/(\d+),\s*(\d+)/);
+          if (match) {
+            return {
+              x: parseInt(match[1]),
+              y: parseInt(match[2])
+            };
+          }
+        } catch (error) {
+          console.error('AppleScript获取鼠标位置失败:', error);
+        }
+        
+        // 备用方案：使用Python获取鼠标位置
+        try {
+          const result = execSync('python3 -c "from Quartz import CGEventGetLocation; from AppKit import NSEvent; loc = CGEventGetLocation(None); print(f\'{int(loc.x)},{int(loc.y)}\')"', { encoding: 'utf8' });
+          const match = result.match(/(\d+),(\d+)/);
+          if (match) {
+            return {
+              x: parseInt(match[1]),
+              y: parseInt(match[2])
+            };
+          }
+        } catch (pythonError) {
+          console.error('Python获取鼠标位置失败:', pythonError);
         }
       }
     } catch (error) {
