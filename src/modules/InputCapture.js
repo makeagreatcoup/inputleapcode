@@ -106,7 +106,8 @@ class InputCapture extends EventEmitter {
       
       if (this.platform === 'win32') {
         // Windows使用PowerShell获取鼠标位置，修复中文乱码问题
-        const result = execSync('powershell -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $pos = [System.Windows.Forms.Cursor]::Position; Write-Output \"X=$($pos.X) Y=$($pos.Y)\"""', { 
+        const { execSync } = require('child_process');
+        const result = execSync('powershell -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $pos = [System.Windows.Forms.Cursor]::Position; Write-Host X=$($pos.X) Y=$($pos.Y)"', { 
           encoding: 'utf8',
           shell: 'cmd.exe',
           env: {
