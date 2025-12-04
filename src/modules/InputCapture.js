@@ -234,15 +234,36 @@ class InputCapture extends EventEmitter {
         this.isRemoteMoving = false;
       }, 500);
       
+      console.log(`准备移动鼠标到位置: (${x}, ${y})`);
+      
       if (this.platform === 'win32') {
         // Windows使用PowerShell移动鼠标，先加载程序集
         const { execSync } = require('child_process');
         const psCommand = `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})`;
-        execSync(`powershell -Command "${psCommand}"`, { encoding: 'utf8' });
+        
+        // 使用spawn替代execSync，避免阻塞
+        const { spawn } = require('child_process');
+        const child = spawn('powershell', ['-Command', psCommand], {
+          stdio: 'pipe',
+          shell: true
+        });
+        
+        child.on('error', (error) => {
+          console.error('PowerShell进程错误:', error);
+        });
+        
+        child.on('close', (code) => {
+          if (code === 0) {
+            console.log(`鼠标移动到 (${x}, ${y}) 完成`);
+          } else {
+            console.error(`鼠标移动失败，退出码: ${code}`);
+          }
+        });
+        
       } else if (this.platform === 'darwin') {
-        // macOS使用AppleScript移动鼠标
+        // macOS使用AppleScript移动鼠标（简化版本）
         const { execSync } = require('child_process');
-        execSync(`osascript -e 'tell application "System Events" to set frontmost of process "InputLeap Code" to true' -e 'tell application "System Events" to set the position of the mouse to {${x}, ${y}}'`, { encoding: 'utf8' });
+        execSync(`osascript -e 'tell application "System Events" to set the position of the mouse to {${x}, ${y}}'`, { encoding: 'utf8' });
       }
     } catch (error) {
       console.error('移动鼠标失败:', error);

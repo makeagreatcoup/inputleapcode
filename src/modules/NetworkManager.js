@@ -160,33 +160,12 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
 
   handleMessage(connectionId, data) {
     try {
-      // 获取或创建连接缓冲区
-      if (!this.connectionBuffers) {
-        this.connectionBuffers = new Map();
-      }
-      
-      let buffer = this.connectionBuffers.get(connectionId) || '';
-      buffer += data.toString();
-      
-      // 查找完整的消息行
-      const lines = buffer.split('\n');
-      const completeLines = lines.slice(0, -1); // 最后一行可能不完整
-      const lastLine = lines[lines.length - 1];
-      
-      // 更新缓冲区，保留不完整的最后一行
-      this.connectionBuffers.set(connectionId, lastLine);
-      
-      // 处理完整的消息
-      completeLines.forEach(line => {
-        if (line.trim()) {
-          try {
-            const message = JSON.parse(line.trim());
-            this.processMessage(connectionId, message);
-          } catch (error) {
-            console.error('解析消息失败:', error.message);
-            console.error('原始消息:', line.substring(0, 100));
-          }
-        }
+      console.log(`handleMessage被调用，连接ID: ${connectionId}，数据长度: ${data.length}`);
+      const messages = this.parseMessages(data);
+      console.log(`解析到 ${messages.length} 条消息`);
+      messages.forEach((message, index) => {
+        console.log(`处理第${index + 1}条消息:`, message.type);
+        this.processMessage(connectionId, message);
       });
     } catch (error) {
       console.error('消息处理错误:', error);
@@ -199,13 +178,19 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
     let buffer = data.toString();
     let lines = buffer.split('\n');
     
-    lines.forEach(line => {
+    console.log('解析消息，原始数据:', buffer.substring(0, 200) + '...');
+    
+    lines.forEach((line, index) => {
       if (line.trim()) {
         try {
           // 确保JSON字符串完整
           const jsonStr = line.trim();
+          console.log(`处理第${index + 1}行:`, jsonStr);
+          
           if (jsonStr.startsWith('{') && jsonStr.endsWith('}')) {
-            messages.push(JSON.parse(jsonStr));
+            const parsed = JSON.parse(jsonStr);
+            console.log('解析成功:', parsed.type);
+            messages.push(parsed);
           } else {
             console.warn('跳过不完整的消息:', jsonStr.substring(0, 50) + '...');
           }
@@ -216,6 +201,7 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
       }
     });
     
+    console.log('解析完成，共', messages.length, '条消息');
     return messages;
   }
 
@@ -226,6 +212,7 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
         break;
         
       case 'mouse-move':
+        console.log('NetworkManager: 处理mouse-move事件:', message.data);
         this.emit('mouse-move', message.data);
         break;
         
