@@ -18,8 +18,10 @@ const args = process.argv.slice(2);
 const isDev = args.includes('--dev');
 
 // 启动Electron应用
-const electronArgs = isDev ? ['electron', '.', '--dev'] : ['electron', '.'];
-const child = spawn('npx', electronArgs, { stdio: 'inherit' });
+const { execPath } = process;
+const electronPath = require.resolve('electron');
+const electronArgs = isDev ? [electronPath, '.', '--dev'] : [electronPath, '.'];
+const child = spawn(execPath, electronArgs, { stdio: 'inherit' });
 
 child.on('close', (code) => {
   process.exit(code);
