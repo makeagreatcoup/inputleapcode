@@ -105,8 +105,8 @@ class InputCapture extends EventEmitter {
       const { execSync } = require('child_process');
       
       if (this.platform === 'win32') {
-        // Windows使用PowerShell获取鼠标位置
-        const result = execSync('powershell -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $pos = [System.Windows.Forms.Cursor]::Position; Write-Output \"X=$($pos.X) Y=$($pos.Y)\""', { encoding: 'utf8' });
+        // Windows使用PowerShell获取鼠标位置，修复中文乱码问题
+        const result = execSync('powershell -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $pos = [System.Windows.Forms.Cursor]::Position; Write-Output \"X=$($pos.X) Y=$($pos.Y)\""', { encoding: 'utf8', shell: 'cmd.exe' });
         const match = result.match(/X=(\d+)\s+Y=(\d+)/);
         if (match) {
           return {
@@ -114,6 +114,7 @@ class InputCapture extends EventEmitter {
             y: parseInt(match[2])
           };
         }
+
       } else if (this.platform === 'darwin') {
         // macOS使用CGEvent获取鼠标位置
         const result = execSync('python3 -c "from Quartz import CGEventGetLocation; from AppKit import NSEvent; print(CGEventGetLocation(NSEvent.mouseEvent()))"', { encoding: 'utf8' });
@@ -237,15 +238,16 @@ class InputCapture extends EventEmitter {
       console.log(`准备移动鼠标到位置: (${x}, ${y})`);
       
       if (this.platform === 'win32') {
-        // Windows使用PowerShell移动鼠标，先加载程序集
+        // Windows使用PowerShell移动鼠标，先加载程序集，修复中文乱码问题
         const { execSync } = require('child_process');
-        const psCommand = `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})`;
+        const psCommand = `powershell -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})"`;
         
         // 使用spawn替代execSync，避免阻塞
         const { spawn } = require('child_process');
         const child = spawn('powershell', ['-Command', psCommand], {
           stdio: 'pipe',
-          shell: true
+          shell: true,
+          encoding: 'utf8'
         });
         
         child.on('error', (error) => {
