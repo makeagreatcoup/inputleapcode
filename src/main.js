@@ -1,0 +1,192 @@
+const { app, BrowserWindow, ipcMain, net } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+
+// 导入核心模块
+const NetworkManager = require('./modules/NetworkManager');
+const InputCapture = require('./modules/InputCapture');
+const ClipboardSync = require('./modules/ClipboardSync');
+const FileTransfer = require('./modules/FileTransfer');
+const DeviceDiscovery = require('./modules/DeviceDiscovery');
+
+class InputLeapApp {
+  constructor() {
+    this.mainWindow = null;
+    this.networkManager = null;
+    this.inputCapture = null;
+    this.clipboardSync = null;
+    this.fileTransfer = null;
+    this.deviceDiscovery = null;
+    this.isServer = false;
+    this.connectedDevices = new Map();
+  }
+
+  async initialize() {
+    await app.whenReady();
+    this.createMainWindow();
+    this.initializeModules();
+    this.setupIpcHandlers();
+  }
+
+  createMainWindow() {
+    this.mainWindow = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        enableRemoteModule: true
+      },
+      icon: path.join(__dirname, '../assets/icon.png'),
+      show: false
+    });
+
+    this.mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
+    this.mainWindow.once('ready-to-show', () => {
+      this.mainWindow.show();
+    });
+
+    if (process.argv.includes('--dev')) {
+      this.mainWindow.webContents.openDevTools();
+    }
+  }
+
+  initializeModules() {
+    // 初始化网络管理器
+    this.networkManager = new NetworkManager();
+    this.networkManager.on('connected', (deviceId) => {
+      this.connectedDevices.set(deviceId, { status: 'connected' });
+      this.mainWindow.webContents.send('device-connected', deviceId);
+    });
+
+    this.networkManager.on('disconnected', (deviceId) => {
+      this.connectedDevices.delete(deviceId);
+      this.mainWindow.webContents.send('device-disconnected', deviceId);
+    });
+
+    // 初始化输入捕获
+    this.inputCapture = new InputCapture();
+    this.inputCapture.on('mouse-move', (data) => {
+      if (this.networkManager.isConnected()) {
+        this.networkManager.sendEvent('mouse-move', data);
+      }
+    });
+
+    this.inputCapture.on('mouse-click', (data) => {
+      if (this.networkManager.isConnected()) {
+        this.networkManager.sendEvent('mouse-click', data);
+      }
+    });
+
+    this.inputCapture.on('key-press', (data) => {
+      if (this.networkManager.isConnected()) {
+        this.networkManager.sendEvent('key-press', data);
+      }
+    });
+
+    // 初始化剪贴板同步
+    this.clipboardSync = new ClipboardSync();
+    this.clipboardSync.on('clipboard-change', (data) => {
+      if (this.networkManager.isConnected()) {
+        this.networkManager.sendEvent('clipboard-change', data);
+      }
+    });
+
+    // 初始化文件传输
+    this.fileTransfer = new FileTransfer();
+    this.fileTransfer.on('file-received', (data) => {
+      this.mainWindow.webContents.send('file-received', data);
+    });
+
+    // 初始化设备发现
+    this.deviceDiscovery = new DeviceDiscovery();
+    this.deviceDiscovery.on('device-found', (device) => {
+      this.mainWindow.webContents.send('device-found', device);
+    });
+  }
+
+  setupIpcHandlers() {
+    // 启动服务器
+    ipcMain.handle('start-server', async (event, config) => {
+      try {
+        this.isServer = true;
+        await this.networkManager.startServer(config.port, config.useTLS);
+        await this.deviceDiscovery.startAnnouncement(config.name);
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+
+    // 连接到服务器
+    ipcMain.handle('connect-to-server', async (event, config) => {
+      try {
+        this.isServer = false;
+        await this.networkManager.connectToServer(config.host, config.port, config.useTLS);
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+
+    // 搜索设备
+    ipcMain.handle('discover-devices', async () => {
+      return await this.deviceDiscovery.discover();
+    });
+
+    // 发送文件
+    ipcMain.handle('send-file', async (event, filePath, deviceId) => {
+      try {
+        await this.fileTransfer.sendFile(filePath, deviceId);
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+
+    // 获取连接状态
+    ipcMain.handle('get-connection-status', () => {
+      return {
+        isConnected: this.networkManager.isConnected(),
+        isServer: this.isServer,
+        connectedDevices: Array.from(this.connectedDevices.keys())
+      };
+    });
+
+    // 断开连接
+    ipcMain.handle('disconnect', () => {
+      this.networkManager.disconnect();
+      this.deviceDiscovery.stop();
+    });
+  }
+}
+
+// 应用启动
+const inputLeapApp = new InputLeapApp();
+
+app.on('ready', () => {
+  inputLeapApp.initialize();
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    inputLeapApp.createMainWindow();
+  }
+});
+
+// 安全退出
+app.on('before-quit', () => {
+  if (inputLeapApp.networkManager) {
+    inputLeapApp.networkManager.disconnect();
+  }
+  if (inputLeapApp.deviceDiscovery) {
+    inputLeapApp.deviceDiscovery.stop();
+  }
+});

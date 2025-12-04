@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InputLeap Code - 跨平台键鼠共享</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            margin: 20px auto;
+            max-width: 1200px;
+            overflow: hidden;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        
+        .status-connected {
+            background-color: #28a745;
+            box-shadow: 0 0 10px rgba(40, 167, 69, 0.5);
+        }
+        
+        .status-disconnected {
+            background-color: #dc3545;
+        }
+        
+        .status-searching {
+            background-color: #ffc107;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .device-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .device-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .device-card.selected {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        
+        .feature-icon {
+            font-size: 2rem;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .tab-content {
+            padding: 20px;
+        }
+        
+        .progress-container {
+            margin: 10px 0;
+        }
+        
+        .file-transfer-item {
+            padding: 10px;
+            border-left: 4px solid #667eea;
+            background-color: #f8f9fa;
+            margin-bottom: 5px;
+        }
+        
+        .nav-tabs .nav-link {
+            color: #667eea;
+            font-weight: 500;
+        }
+        
+        .nav-tabs .nav-link.active {
+            background-color: #667eea;
+            border-color: #667eea;
+            color: white;
+        }
+        
+        .btn-primary {
+            background-color: #667eea;
+            border-color: #667eea;
+        }
+        
+        .btn-primary:hover {
+            background-color: #5a6fd8;
+            border-color: #5a6fd8;
+        }
+        
+        .settings-section {
+            margin-bottom: 25px;
+        }
+        
+        .settings-section h5 {
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 5px;
+            margin-bottom: 15px;
+        }
+        
+        .logo-container {
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .logo-container h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 0;
+        }
+        
+        .logo-container p {
+            margin: 5px 0 0 0;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="main-container">
+            <div class="logo-container">
+                <h1><i class="bi bi-link-45deg"></i> InputLeap Code</h1>
+                <p>跨平台键鼠共享系统</p>
+            </div>
+            
+            <div class="container-fluid p-4">
+                <!-- 连接状态栏 -->
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <span class="status-indicator" id="connectionStatus"></span>
+                                        <span id="connectionText">未连接</span>
+                                    </div>
+                                    <div>
+                                        <span id="deviceInfo" class="text-muted"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 主要内容区域 -->
+                <ul class="nav nav-tabs" id="mainTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="connection-tab" data-bs-toggle="tab" data-bs-target="#connection" type="button" role="tab">
+                            <i class="bi bi-link-45deg"></i> 连接
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="devices-tab" data-bs-toggle="tab" data-bs-target="#devices" type="button" role="tab">
+                            <i class="bi bi-hdd-network"></i> 设备
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="transfer-tab" data-bs-toggle="tab" data-bs-target="#transfer" type="button" role="tab">
+                            <i class="bi bi-files"></i> 传输
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button" role="tab">
+                            <i class="bi bi-gear"></i> 设置
+                        </button>
+                    </li>
+                </ul>
+                
+                <div class="tab-content" id="mainTabContent">
+                    <!-- 连接选项卡 -->
+                    <div class="tab-pane fade show active" id="connection" role="tabpanel">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <h5><i class="bi bi-server"></i> 作为服务器</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p>让其他设备连接到这台电脑</p>
+                                        <div class="mb-3">
+                                            <label for="serverName" class="form-label">设备名称</label>
+                                            <input type="text" class="form-control" id="serverName" placeholder="我的电脑">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="serverPort" class="form-label">端口</label>
+                                            <input type="number" class="form-control" id="serverPort" value="24800">
+                                        </div>
+                                        <div class="mb-3">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="serverTLS" checked>
+                                                <label class="form-check-label" for="serverTLS">
+                                                    启用TLS加密
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <button class="btn btn-primary" id="startServerBtn">
+                                            <i class="bi bi-play-circle"></i> 启动服务器
+                                        </button>
+                                        <button class="btn btn-danger d-none" id="stopServerBtn">
+                                            <i class="bi bi-stop-circle"></i> 停止服务器
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header">
+                                        <h5><i class="bi bi-laptop"></i> 连接到服务器</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p>连接到另一台电脑</p>
+                                        <div class="mb-3">
+                                            <label for="serverHost" class="form-label">服务器地址</label>
+                                            <input type="text" class="form-control" id="serverHost" placeholder="192.168.1.100">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="clientPort" class="form-label">端口</label>
+                                            <input type="number" class="form-control" id="clientPort" value="24800">
+                                        </div>
+                                        <div class="mb-3">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="clientTLS" checked>
+                                                <label class="form-check-label" for="clientTLS">
+                                                    使用TLS加密
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <button class="btn btn-primary" id="connectBtn">
+                                            <i class="bi bi-link-45deg"></i> 连接
+                                        </button>
+                                        <button class="btn btn-danger d-none" id="disconnectBtn">
+                                            <i class="bi bi-link-45deg"></i> 断开连接
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 设备选项卡 -->
+                    <div class="tab-pane fade" id="devices" role="tabpanel">
+                        <div class="row">
+                            <div class="col-12">
+                                <div class="card">
+                                    <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h5><i class="bi bi-search"></i> 发现设备</h5>
+                                        <button class="btn btn-outline-primary" id="discoverBtn">
+                                            <i class="bi bi-arrow-clockwise"></i> 刷新
+                                        </button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="devicesList">
+                                            <div class="text-center text-muted">
+                                                <i class="bi bi-search" style="font-size: 3rem;"></i>
+                                                <p>点击"刷新"搜索局域网内的设备</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 传输选项卡 -->
+                    <div class="tab-pane fade" id="transfer" role="tabpanel">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5><i class="bi bi-upload"></i> 发送文件</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label for="fileSelect" class="form-label">选择文件</label>
+                                            <input type="file" class="form-control" id="fileSelect" multiple>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="targetDevice" class="form-label">目标设备</label>
+                                            <select class="form-select" id="targetDevice">
+                                                <option value="">请选择设备</option>
+                                            </select>
+                                        </div>
+                                        <button class="btn btn-primary" id="sendFileBtn">
+                                            <i class="bi bi-send"></i> 发送文件
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5><i class="bi bi-download"></i> 传输历史</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="transferHistory">
+                                            <p class="text-muted">暂无传输记录</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 设置选项卡 -->
+                    <div class="tab-pane fade" id="settings" role="tabpanel">
+                        <div class="row">
+                            <div class="col-12">
+                                <div class="settings-section">
+                                    <h5><i class="bi bi-mouse"></i> 鼠标设置</h5>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="mouseSharing" checked>
+                                        <label class="form-check-label" for="mouseSharing">
+                                            启用鼠标共享
+                                        </label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="mouseScroll" checked>
+                                        <label class="form-check-label" for="mouseScroll">
+                                            启用鼠标滚轮同步
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-section">
+                                    <h5><i class="bi bi-keyboard"></i> 键盘设置</h5>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="keyboardSharing" checked>
+                                        <label class="form-check-label" for="keyboardSharing">
+                                            启用键盘共享
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-section">
+                                    <h5><i class="bi bi-clipboard"></i> 剪贴板设置</h5>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="clipboardSync" checked>
+                                        <label class="form-check-label" for="clipboardSync">
+                                            启用剪贴板同步
+                                        </label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="imageSync" checked>
+                                        <label class="form-check-label" for="imageSync">
+                                            同步图片内容
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-section">
+                                    <h5><i class="bi bi-shield-check"></i> 安全设置</h5>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="autoTLS" checked>
+                                        <label class="form-check-label" for="autoTLS">
+                                            自动启用TLS加密
+                                        </label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="verifyCertificate">
+                                        <label class="form-check-label" for="verifyCertificate">
+                                            验证证书（实验性）
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <div class="settings-section">
+                                    <h5><i class="bi bi-gear"></i> 高级设置</h5>
+                                    <div class="mb-3">
+                                        <label for="maxFileSize" class="form-label">最大文件大小 (MB)</label>
+                                        <input type="number" class="form-control" id="maxFileSize" value="100">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="connectionTimeout" class="form-label">连接超时 (秒)</label>
+                                        <input type="number" class="form-control" id="connectionTimeout" value="10">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

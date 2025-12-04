@@ -1,0 +1,259 @@
+const EventEmitter = require('events');
+const os = require('os');
+
+class InputCapture extends EventEmitter {
+  constructor() {
+    super();
+    this.isCapturing = false;
+    this.screenBounds = this.getScreenBounds();
+    this.platform = os.platform();
+    
+    // 鼠标移动阈值，避免过于频繁的事件
+    this.mouseThreshold = 5;
+    this.lastMousePos = { x: 0, y: 0 };
+    
+    this.initializeCapture();
+  }
+
+  initializeCapture() {
+    if (this.platform === 'win32') {
+      this.initializeWindowsCapture();
+    } else if (this.platform === 'darwin') {
+      this.initializeMacCapture();
+    }
+  }
+
+  initializeWindowsCapture() {
+    try {
+      // Windows平台输入捕获（简化版本）
+      this.startMouseCapture();
+      this.startKeyboardCapture();
+    } catch (error) {
+      console.error('Windows输入捕获初始化失败:', error);
+    }
+  }
+
+  initializeMacCapture() {
+    try {
+      // macOS平台需要特殊权限
+      this.requestMacPermissions();
+      this.startMouseCapture();
+      this.startKeyboardCapture();
+    } catch (error) {
+      console.error('macOS输入捕获初始化失败:', error);
+    }
+  }
+
+  async requestMacPermissions() {
+    // macOS需要辅助功能权限
+    // 这里可以添加权限检查和请求逻辑
+    console.log('检查macOS辅助功能权限...');
+  }
+
+  startMouseCapture() {
+    this.isCapturing = true;
+    
+    // 使用定时器检查鼠标位置（模拟）
+    this.mouseInterval = setInterval(() => {
+      if (!this.isCapturing) return;
+      
+      try {
+        // 模拟鼠标位置检测
+        const mousePos = this.simulateMousePos();
+        
+        // 检查鼠标是否移动了足够的距离
+        const deltaX = Math.abs(mousePos.x - this.lastMousePos.x);
+        const deltaY = Math.abs(mousePos.y - this.lastMousePos.y);
+        
+        if (deltaX >= this.mouseThreshold || deltaY >= this.mouseThreshold) {
+          this.lastMousePos = mousePos;
+          
+          // 检查鼠标是否在屏幕边缘
+          const edge = this.getScreenEdge(mousePos);
+          if (edge) {
+            this.emit('mouse-move', {
+              x: mousePos.x,
+              y: mousePos.y,
+              edge: edge,
+              screenBounds: this.screenBounds
+            });
+          }
+        }
+      } catch (error) {
+        console.error('鼠标捕获错误:', error);
+      }
+    }, 16); // 约60fps
+  }
+
+  simulateMousePos() {
+    // 模拟鼠标位置，实际应用中应使用robotjs或其他输入库
+    return {
+      x: Math.floor(Math.random() * this.screenBounds.width),
+      y: Math.floor(Math.random() * this.screenBounds.height)
+    };
+  }
+
+  startKeyboardCapture() {
+    // 键盘事件捕获（简化版本）
+    try {
+      console.log('键盘捕获已启动');
+    } catch (error) {
+      console.error('键盘捕获初始化失败:', error);
+    }
+  }
+
+  getScreenBounds() {
+    try {
+      // 默认屏幕尺寸，实际应用中应获取真实屏幕尺寸
+      return {
+        width: 1920,
+        height: 1080,
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1080
+      };
+    } catch (error) {
+      console.error('获取屏幕边界失败:', error);
+      return {
+        width: 1920,
+        height: 1080,
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1080
+      };
+    }
+  }
+
+  getScreenEdge(mousePos) {
+    const threshold = 10; // 边缘检测阈值（像素）
+    const bounds = this.screenBounds;
+    
+    // 左边缘
+    if (mousePos.x <= bounds.left + threshold) {
+      return 'left';
+    }
+    
+    // 右边缘
+    if (mousePos.x >= bounds.right - threshold) {
+      return 'right';
+    }
+    
+    // 上边缘
+    if (mousePos.y <= bounds.top + threshold) {
+      return 'top';
+    }
+    
+    // 下边缘
+    if (mousePos.y >= bounds.bottom - threshold) {
+      return 'bottom';
+    }
+    
+    return null;
+  }
+
+  // 模拟鼠标移动（接收远程事件时使用）
+  simulateMouseMove(data) {
+    try {
+      console.log(`模拟鼠标移动到: ${data.x}, ${data.y}`);
+      // 实际应用中应使用robotjs
+    } catch (error) {
+      console.error('鼠标移动模拟失败:', error);
+    }
+  }
+
+  // 模拟鼠标点击
+  simulateMouseClick(data) {
+    try {
+      const button = data.button || 'left';
+      const double = data.double || false;
+      console.log(`模拟鼠标${double ? '双' : '单'}击: ${button}`);
+      // 实际应用中应使用robotjs
+    } catch (error) {
+      console.error('鼠标点击模拟失败:', error);
+    }
+  }
+
+  // 模拟键盘按键
+  simulateKeyPress(data) {
+    try {
+      const key = data.key;
+      const modifier = data.modifier;
+      console.log(`模拟键盘按键: ${modifier ? modifier + '+' : ''}${key}`);
+      // 实际应用中应使用robotjs
+    } catch (error) {
+      console.error('键盘按键模拟失败:', error);
+    }
+  }
+
+  // 处理鼠标滚轮
+  simulateMouseScroll(data) {
+    try {
+      console.log(`模拟鼠标滚轮: x=${data.x || 0}, y=${data.y || 0}`);
+      // 实际应用中应使用robotjs
+    } catch (error) {
+      console.error('鼠标滚轮模拟失败:', error);
+    }
+  }
+
+  // 处理拖拽操作
+  simulateMouseDrag(data) {
+    try {
+      console.log(`模拟鼠标拖拽到: ${data.x}, ${data.y}`);
+      // 实际应用中应使用robotjs
+    } catch (error) {
+      console.error('鼠标拖拽模拟失败:', error);
+    }
+  }
+
+  // 更新屏幕边界（当屏幕配置改变时）
+  updateScreenBounds() {
+    this.screenBounds = this.getScreenBounds();
+  }
+
+  // 停止捕获
+  stopCapture() {
+    this.isCapturing = false;
+    
+    if (this.mouseInterval) {
+      clearInterval(this.mouseInterval);
+      this.mouseInterval = null;
+    }
+    
+    // 停止键盘捕获
+    // 这里需要根据实际实现添加清理代码
+  }
+
+  // 获取当前鼠标位置
+  getCurrentMousePosition() {
+    try {
+      return this.simulateMousePos();
+    } catch (error) {
+      console.error('获取鼠标位置失败:', error);
+      return { x: 0, y: 0 };
+    }
+  }
+
+  // 检查点是否在屏幕内
+  isPointInScreen(point) {
+    return point.x >= this.screenBounds.left &&
+           point.x <= this.screenBounds.right &&
+           point.y >= this.screenBounds.top &&
+           point.y <= this.screenBounds.bottom;
+  }
+
+  // 将远程坐标转换到本地屏幕坐标
+  translateCoordinates(remotePoint, remoteBounds) {
+    // 简单的比例转换，可以根据需要实现更复杂的布局逻辑
+    const scaleX = this.screenBounds.width / remoteBounds.width;
+    const scaleY = this.screenBounds.height / remoteBounds.height;
+    
+    return {
+      x: this.screenBounds.left + (remotePoint.x - remoteBounds.left) * scaleX,
+      y: this.screenBounds.top + (remotePoint.y - remoteBounds.top) * scaleY
+    };
+  }
+}
+
+module.exports = InputCapture;
