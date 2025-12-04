@@ -12,6 +12,10 @@ class InputCapture extends EventEmitter {
     this.mouseThreshold = 5;
     this.lastMousePos = { x: 0, y: 0 };
     
+    // 防止循环移动的标志
+    this.isRemoteMoving = false;
+    this.remoteMoveTimeout = null;
+    
     this.initializeCapture();
   }
 
@@ -25,9 +29,9 @@ class InputCapture extends EventEmitter {
 
   initializeWindowsCapture() {
     try {
-      // Windows平台输入捕获（简化版本）
-      this.startMouseCapture();
+      // Windows平台输入捕获初始化（不自动启动）
       this.startKeyboardCapture();
+      console.log('Windows输入捕获初始化完成');
     } catch (error) {
       console.error('Windows输入捕获初始化失败:', error);
     }
@@ -37,8 +41,8 @@ class InputCapture extends EventEmitter {
     try {
       // macOS平台需要特殊权限
       this.requestMacPermissions();
-      this.startMouseCapture();
       this.startKeyboardCapture();
+      console.log('macOS输入捕获初始化完成');
     } catch (error) {
       console.error('macOS输入捕获初始化失败:', error);
     }
@@ -53,12 +57,12 @@ class InputCapture extends EventEmitter {
   startMouseCapture() {
     this.isCapturing = true;
     
-    // 使用定时器检查鼠标位置（模拟）
+    // 使用定时器检查鼠标位置
     this.mouseInterval = setInterval(() => {
       if (!this.isCapturing) return;
       
       try {
-        // 模拟鼠标位置检测
+        // 获取真实鼠标位置
         const mousePos = this.simulateMousePos();
         
         // 检查鼠标是否移动了足够的距离
@@ -68,9 +72,10 @@ class InputCapture extends EventEmitter {
         if (deltaX >= this.mouseThreshold || deltaY >= this.mouseThreshold) {
           this.lastMousePos = mousePos;
           
-          // 检查鼠标是否在屏幕边缘
+          // 检查鼠标是否在屏幕边缘（只有边缘才发送跨设备事件）
           const edge = this.getScreenEdge(mousePos);
-          if (edge) {
+          if (edge && !this.isRemoteMoving) {
+            console.log(`鼠标到达${edge}边缘，位置: (${mousePos.x}, ${mousePos.y})`);
             this.emit('mouse-move', {
               x: mousePos.x,
               y: mousePos.y,
@@ -85,11 +90,49 @@ class InputCapture extends EventEmitter {
     }, 16); // 约60fps
   }
 
+  stopMouseCapture() {
+    this.isCapturing = false;
+    if (this.mouseInterval) {
+      clearInterval(this.mouseInterval);
+      this.mouseInterval = null;
+    }
+    console.log('鼠标捕获已停止');
+  }
+
   simulateMousePos() {
-    // 模拟鼠标位置，实际应用中应使用robotjs或其他输入库
-    return {
-      x: Math.floor(Math.random() * this.screenBounds.width),
-      y: Math.floor(Math.random() * this.screenBounds.height)
+    // 获取真实鼠标位置
+    try {
+      const { execSync } = require('child_process');
+      
+      if (this.platform === 'win32') {
+        // Windows使用PowerShell获取鼠标位置
+        const result = execSync('powershell -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $pos = [System.Windows.Forms.Cursor]::Position; Write-Output \"X=$($pos.X) Y=$($pos.Y)\""', { encoding: 'utf8' });
+        const match = result.match(/X=(\d+)\s+Y=(\d+)/);
+        if (match) {
+          return {
+            x: parseInt(match[1]),
+            y: parseInt(match[2])
+          };
+        }
+      } else if (this.platform === 'darwin') {
+        // macOS使用CGEvent获取鼠标位置
+        const result = execSync('python3 -c "from Quartz import CGEventGetLocation; from AppKit import NSEvent; print(CGEventGetLocation(NSEvent.mouseEvent()))"', { encoding: 'utf8' });
+        const match = result.match(/(\d+)\.(\d+)/);
+        if (match) {
+          return {
+            x: Math.floor(parseFloat(match[1] + '.' + match[2])),
+            y: Math.floor(parseFloat(match[3] + '.' + match[4] || '0'))
+          };
+        }
+      }
+    } catch (error) {
+      console.error('获取鼠标位置失败:', error);
+    }
+    
+    // 如果获取失败，返回最后已知位置或随机位置
+    return this.lastMousePos || {
+      x: Math.floor(this.screenBounds.width / 2),
+      y: Math.floor(this.screenBounds.height / 2)
     };
   }
 
@@ -172,6 +215,37 @@ class InputCapture extends EventEmitter {
       // 实际应用中应使用robotjs
     } catch (error) {
       console.error('鼠标点击模拟失败:', error);
+    }
+  }
+
+  // 移动鼠标到指定位置
+  moveMouseTo(x, y) {
+    try {
+      // 设置远程移动标志，防止循环
+      this.isRemoteMoving = true;
+      
+      // 清除之前的超时
+      if (this.remoteMoveTimeout) {
+        clearTimeout(this.remoteMoveTimeout);
+      }
+      
+      // 500ms后清除远程移动标志
+      this.remoteMoveTimeout = setTimeout(() => {
+        this.isRemoteMoving = false;
+      }, 500);
+      
+      if (this.platform === 'win32') {
+        // Windows使用PowerShell移动鼠标，先加载程序集
+        const { execSync } = require('child_process');
+        const psCommand = `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})`;
+        execSync(`powershell -Command "${psCommand}"`, { encoding: 'utf8' });
+      } else if (this.platform === 'darwin') {
+        // macOS使用AppleScript移动鼠标
+        const { execSync } = require('child_process');
+        execSync(`osascript -e 'tell application "System Events" to set frontmost of process "InputLeap Code" to true' -e 'tell application "System Events" to set the position of the mouse to {${x}, ${y}}'`, { encoding: 'utf8' });
+      }
+    } catch (error) {
+      console.error('移动鼠标失败:', error);
     }
   }
 

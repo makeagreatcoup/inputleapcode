@@ -65,6 +65,45 @@ class InputLeapApp {
       this.mainWindow.webContents.send('device-disconnected', deviceId);
     });
 
+    // 接收远程鼠标移动事件
+    this.networkManager.on('mouse-move', (data) => {
+      console.log(`接收到远程鼠标移动事件: (${data.x}, ${data.y}), 边缘: ${data.edge}`);
+      
+      // 计算在本地屏幕的对应位置
+      const localBounds = this.inputCapture.screenBounds;
+      let targetX = data.x;
+      let targetY = data.y;
+      
+      // 根据边缘调整位置
+      switch (data.edge) {
+        case 'left':
+          targetX = localBounds.right - 50; // 从右边缘进入
+          break;
+        case 'right':
+          targetX = localBounds.left + 50; // 从左边缘进入
+          break;
+        case 'top':
+          targetY = localBounds.bottom - 50; // 从下边缘进入
+          break;
+        case 'bottom':
+          targetY = localBounds.top + 50; // 从上边缘进入
+          break;
+      }
+      
+      console.log(`移动鼠标到本地位置: (${targetX}, ${targetY})`);
+      this.inputCapture.moveMouseTo(targetX, targetY);
+    });
+
+    // 接收远程鼠标点击事件
+    this.networkManager.on('mouse-click', (data) => {
+      this.inputCapture.simulateMouseClick(data);
+    });
+
+    // 接收远程键盘按键事件
+    this.networkManager.on('key-press', (data) => {
+      this.inputCapture.simulateKeyPress(data);
+    });
+
     // 初始化输入捕获
     this.inputCapture = new InputCapture();
     this.inputCapture.on('mouse-move', (data) => {
@@ -122,6 +161,10 @@ class InputLeapApp {
         });
         
         await this.deviceDiscovery.startAnnouncement(config.name);
+        
+        // 启动鼠标捕获（只有服务器需要）
+        this.inputCapture.startMouseCapture();
+        
         return { success: true, serverInfo };
       } catch (error) {
         return { success: false, error: error.message };
@@ -167,6 +210,7 @@ class InputLeapApp {
     ipcMain.handle('disconnect', () => {
       this.networkManager.disconnect();
       this.deviceDiscovery.stop();
+      this.inputCapture.stopMouseCapture();
     });
   }
 }

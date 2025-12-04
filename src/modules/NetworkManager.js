@@ -117,13 +117,18 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
 
     socket.on('close', () => {
       this.connections.delete(connectionId);
+      if (this.connectionBuffers) {
+        this.connectionBuffers.delete(connectionId);
+      }
       this.emit('disconnected', connectionId);
     });
 
     socket.on('error', (error) => {
       console.error('连接错误:', error);
       this.connections.delete(connectionId);
-      this.emit('disconnected', connectionId);
+      if (this.connectionBuffers) {
+        this.connectionBuffers.delete(connectionId);
+      }
     });
 
     // 发送初始握手消息
@@ -155,9 +160,33 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
 
   handleMessage(connectionId, data) {
     try {
-      const messages = this.parseMessages(data);
-      messages.forEach(message => {
-        this.processMessage(connectionId, message);
+      // 获取或创建连接缓冲区
+      if (!this.connectionBuffers) {
+        this.connectionBuffers = new Map();
+      }
+      
+      let buffer = this.connectionBuffers.get(connectionId) || '';
+      buffer += data.toString();
+      
+      // 查找完整的消息行
+      const lines = buffer.split('\n');
+      const completeLines = lines.slice(0, -1); // 最后一行可能不完整
+      const lastLine = lines[lines.length - 1];
+      
+      // 更新缓冲区，保留不完整的最后一行
+      this.connectionBuffers.set(connectionId, lastLine);
+      
+      // 处理完整的消息
+      completeLines.forEach(line => {
+        if (line.trim()) {
+          try {
+            const message = JSON.parse(line.trim());
+            this.processMessage(connectionId, message);
+          } catch (error) {
+            console.error('解析消息失败:', error.message);
+            console.error('原始消息:', line.substring(0, 100));
+          }
+        }
       });
     } catch (error) {
       console.error('消息处理错误:', error);
@@ -173,9 +202,16 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
     lines.forEach(line => {
       if (line.trim()) {
         try {
-          messages.push(JSON.parse(line));
+          // 确保JSON字符串完整
+          const jsonStr = line.trim();
+          if (jsonStr.startsWith('{') && jsonStr.endsWith('}')) {
+            messages.push(JSON.parse(jsonStr));
+          } else {
+            console.warn('跳过不完整的消息:', jsonStr.substring(0, 50) + '...');
+          }
         } catch (error) {
-          console.error('解析消息失败:', error);
+          console.error('解析消息失败:', error.message);
+          console.error('原始消息:', line.substring(0, 100));
         }
       }
     });
@@ -226,7 +262,10 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
     const socket = this.connections.get(connectionId) || this.client;
     if (socket && socket.writable) {
       const messageStr = JSON.stringify(message) + '\n';
+      console.log(`发送消息到 ${connectionId}:`, messageStr.trim());
       socket.write(messageStr);
+    } else {
+      console.log(`无法发送消息到 ${connectionId}: socket不可用`);
     }
   }
 
@@ -237,11 +276,15 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
       timestamp: Date.now()
     };
 
+    console.log(`发送事件: ${eventType}, 数据:`, data);
+    
     if (this.client) {
       // 客户端模式：发送到服务器
+      console.log('客户端模式：发送到服务器');
       this.sendMessage('server', message);
     } else {
       // 服务器模式：广播到所有连接的客户端
+      console.log(`服务器模式：广播到 ${this.connections.size} 个客户端`);
       this.connections.forEach((socket, connectionId) => {
         this.sendMessage(connectionId, message);
       });
