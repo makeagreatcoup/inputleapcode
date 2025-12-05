@@ -9,8 +9,11 @@ class InputCapture extends EventEmitter {
     this.platform = os.platform();
     
     // 鼠标移动阈值，避免过于频繁的事件
-    this.mouseThreshold = 5;
+    this.mouseThreshold = 1; // 降低到1像素，提高响应性
     this.lastMousePos = { x: 0, y: 0 };
+
+    // 边缘检测阈值
+    this.edgeThreshold = 5;
     
     // 防止循环移动的标志
     this.isRemoteMoving = false;
@@ -60,38 +63,70 @@ class InputCapture extends EventEmitter {
 
   startMouseCapture() {
     this.isCapturing = true;
-    
+    this.isAtEdge = false; // 新增：跟踪是否在边缘状态
+    this.lastEdge = null;
+
     // 使用定时器检查鼠标位置
     this.mouseInterval = setInterval(() => {
       if (!this.isCapturing) return;
-      
+
       try {
         // 获取真实鼠标位置
         const mousePos = this.simulateMousePos();
-        
+
         // 检查鼠标是否移动了足够的距离
         const deltaX = Math.abs(mousePos.x - this.lastMousePos.x);
         const deltaY = Math.abs(mousePos.y - this.lastMousePos.y);
-        
+
         if (deltaX >= this.mouseThreshold || deltaY >= this.mouseThreshold) {
           this.lastMousePos = mousePos;
-          
-          // 检查鼠标是否在屏幕边缘（只有边缘才发送跨设备事件）
+
+          // 检查鼠标是否在屏幕边缘
           const edge = this.getScreenEdge(mousePos);
+
+          // 状态变化处理
           if (edge && !this.isRemoteMoving) {
-            console.log(`鼠标到达${edge}边缘，位置: (${mousePos.x}, ${mousePos.y})`);
+            if (!this.isAtEdge || edge !== this.lastEdge) {
+              console.log(`🎯 鼠标到达${edge}边缘，位置: (${mousePos.x}, ${mousePos.y})`);
+              this.isAtEdge = true;
+              this.lastEdge = edge;
+
+              this.emit('mouse-move', {
+                x: mousePos.x,
+                y: mousePos.y,
+                edge: edge,
+                screenBounds: this.screenBounds,
+                enterEdge: true
+              });
+            }
+          } else if (!edge && this.isAtEdge) {
+            // 鼠标离开边缘
+            console.log(`🚪 鼠标离开边缘，位置: (${mousePos.x}, ${mousePos.y})`);
+            this.isAtEdge = false;
+            this.lastEdge = null;
+
             this.emit('mouse-move', {
               x: mousePos.x,
               y: mousePos.y,
-              edge: edge,
-              screenBounds: this.screenBounds
+              edge: null,
+              screenBounds: this.screenBounds,
+              leaveEdge: true
+            });
+          } else if (!edge && !this.isRemoteMoving) {
+            // 普通鼠标移动（非边缘，非远程控制）
+            this.emit('mouse-move', {
+              x: mousePos.x,
+              y: mousePos.y,
+              edge: null,
+              screenBounds: this.screenBounds,
+              normalMove: true
             });
           }
         }
       } catch (error) {
         console.error('鼠标捕获错误:', error);
       }
-    }, 16); // 约60fps
+    }, 8); // 提高到120fps，减少延迟
   }
 
   stopMouseCapture() {
@@ -271,29 +306,29 @@ class InputCapture extends EventEmitter {
   }
 
   getScreenEdge(mousePos) {
-    const threshold = 10; // 边缘检测阈值（像素）
+    const threshold = this.edgeThreshold; // 使用实例变量
     const bounds = this.screenBounds;
-    
+
     // 左边缘
     if (mousePos.x <= bounds.left + threshold) {
       return 'left';
     }
-    
+
     // 右边缘
     if (mousePos.x >= bounds.right - threshold) {
       return 'right';
     }
-    
+
     // 上边缘
     if (mousePos.y <= bounds.top + threshold) {
       return 'top';
     }
-    
+
     // 下边缘
     if (mousePos.y >= bounds.bottom - threshold) {
       return 'bottom';
     }
-    
+
     return null;
   }
 
@@ -325,113 +360,123 @@ class InputCapture extends EventEmitter {
       try {
         // 设置远程移动标志，防止循环
         this.isRemoteMoving = true;
-        
+
         // 清除之前的超时
         if (this.remoteMoveTimeout) {
           clearTimeout(this.remoteMoveTimeout);
         }
-        
-        // 500ms后清除远程移动标志
+
+        // 200ms后清除远程移动标志（减少防循环时间）
         this.remoteMoveTimeout = setTimeout(() => {
           this.isRemoteMoving = false;
-        }, 500);
-        
-        console.log(`[InputCapture] 准备移动鼠标到位置: (${x}, ${y})`);
-        
+        }, 200);
+
+        // 坐标边界检查
+        if (x < 0 || y < 0 || x > this.screenBounds.width || y > this.screenBounds.height) {
+          console.warn(`[InputCapture] 坐标超出屏幕范围: (${x}, ${y})，进行裁剪`);
+          x = Math.max(0, Math.min(x, this.screenBounds.width));
+          y = Math.max(0, Math.min(y, this.screenBounds.height));
+        }
+
+        console.log(`[InputCapture] 移动鼠标到位置: (${x}, ${y})`);
+
         if (this.platform === 'win32') {
           // Windows使用PowerShell移动鼠标
-          const { spawn } = require('child_process');
-          const psCommand = `powershell -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})"`;
-          
-          const child = spawn('powershell', ['-Command', psCommand], {
-            stdio: 'pipe',
-            shell: true,
+          const { execSync } = require('child_process');
+          const psCommand = `powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})"`;
+
+          execSync(psCommand, {
             encoding: 'utf8',
-            env: {
-              ...process.env,
-              PYTHONIOENCODING: 'utf-8',
-              LANG: 'zh_CN.UTF-8'
-            }
+            shell: 'cmd.exe',
+            timeout: 1000
           });
-          
-          child.on('error', (error) => {
-            console.error('[InputCapture] PowerShell进程错误:', error);
-            reject(error);
-          });
-          
-          child.on('close', (code) => {
-            if (code === 0) {
-              console.log(`[InputCapture] Windows鼠标移动到 (${x}, ${y}) 完成`);
-              resolve();
-            } else {
-              console.error(`[InputCapture] Windows鼠标移动失败，退出码: ${code}`);
-              reject(new Error(`PowerShell退出码: ${code}`));
-            }
-          });
-          
+          console.log(`[InputCapture] Windows鼠标移动完成: (${x}, ${y})`);
+          resolve();
+
         } else if (this.platform === 'darwin') {
-          const { execSync, spawnSync } = require('child_process');
+          const { execSync } = require('child_process');
           let moved = false;
 
-          // 优先级1: Python Quartz方案 (最可靠)
+          // 优先级1: 使用CGEvent直接移动鼠标（最快）
           try {
-            const pythonScript = `
-import sys
+            const command = `python3 -c "
+from Quartz.CoreGraphics import CGEventCreateMouseEvent, CGEventPost, kCGEventMouseMoved, kCGHIDEventTap, kCGMouseButtonLeft
+from Quartz.CoreGraphics import CGPoint
 try:
-    from Quartz.CoreGraphics import CGEventCreateMouseEvent, CGEventPost, kCGEventMouseMoved, kCGHIDEventTap, kCGMouseButtonLeft
-    from Quartz.CoreGraphics import CGPoint
     event = CGEventCreateMouseEvent(None, kCGEventMouseMoved, CGPoint(${x}, ${y}), kCGMouseButtonLeft)
     CGEventPost(kCGHIDEventTap, event)
-    print("Python鼠标移动成功")
-except ImportError:
-    print("需要安装PyObjC库: pip install PyObjC")
-    sys.exit(1)
+    print('SUCCESS')
 except Exception as e:
-    print(f"Python鼠标移动失败: {e}")
-    sys.exit(1)
-`;
-            const py = spawnSync('python3', ['-c', pythonScript], { encoding: 'utf8' });
-            if (py.status === 0 && py.stdout && py.stdout.includes('成功')) {
+    print(f'ERROR: {e}')
+"`;
+
+            const result = execSync(command, {
+              encoding: 'utf8',
+              timeout: 500
+            }).trim();
+
+            if (result === 'SUCCESS') {
               moved = true;
-              console.log(`[InputCapture] Python Quartz移动鼠标到 (${x}, ${y}) 成功`);
+              console.log(`[InputCapture] CGEvent移动成功: (${x}, ${y})`);
             }
-          } catch (pythonError) {
-            console.warn('[InputCapture] Python Quartz方案失败:', pythonError.message);
+          } catch (error) {
+            console.warn(`[InputCapture] CGEvent移动失败: ${error.message}`);
           }
 
-          // 优先级2: cliclick c:命令 (移动并点击，然后恢复状态)
+          // 优先级2: 使用cliclick工具（如果安装）
           if (!moved) {
             try {
-              // 使用c:命令而不是m:命令，因为c:命令可以移动鼠标
-              execSync(`cliclick c:${x},${y}`, { encoding: 'utf8' });
+              // cliclick的m:命令是纯移动，不点击
+              execSync(`cliclick m:${x},${y}`, {
+                encoding: 'utf8',
+                timeout: 500
+              });
               moved = true;
-              console.log(`[InputCapture] cliclick移动鼠标到 (${x}, ${y}) 成功`);
-            } catch (e) {
-              console.warn('[InputCapture] cliclick移动失败:', e.message);
+              console.log(`[InputCapture] cliclick移动成功: (${x}, ${y})`);
+            } catch (error) {
+              console.warn(`[InputCapture] cliclick移动失败: ${error.message}`);
             }
           }
 
-          // 优先级3: AppleScript方案 (如果启用)
-          if (!moved && process.env.INPUTLEAP_USE_APPLESCRIPT === '1') {
+          // 优先级3: 使用自动化脚本（备用）
+          if (!moved) {
             try {
-              const script = `tell application "System Events" to tell process "System Events" to click at {${x}, ${y}}`;
-              execSync(`osascript -e '${script}'`, { encoding: 'utf8' });
-              moved = true;
-              console.log(`[InputCapture] AppleScript移动鼠标到 (${x}, ${y}) 成功`);
+              const script = `
+tell application "System Events"
+    tell process "System Events"
+        set frontmost to true
+        try
+            -- 使用UI automation来移动鼠标
+            set thePosition to {${x}, ${y}}
+            click at thePosition
+            print("SUCCESS")
+        on error errMsg
+            print("ERROR: " & errMsg)
+        end try
+    end tell
+end tell`;
+
+              const result = execSync(`osascript -e '${script}'`, {
+                encoding: 'utf8',
+                timeout: 1000
+              }).trim();
+
+              if (result.includes('SUCCESS')) {
+                moved = true;
+                console.log(`[InputCapture] AppleScript移动成功: (${x}, ${y})`);
+              }
             } catch (error) {
-              console.warn('[InputCapture] AppleScript鼠标移动失败:', error.message);
+              console.warn(`[InputCapture] AppleScript移动失败: ${error.message}`);
             }
           }
 
           if (moved) {
-            console.log(`[InputCapture] macOS鼠标移动到 (${x}, ${y}) 完成`);
             resolve();
           } else {
-            reject(new Error('所有鼠标移动方法都失败'));
+            reject(new Error('macOS所有鼠标移动方法都失败'));
           }
         } else {
-          // 其他平台
-          console.log(`[InputCapture] 平台 ${this.platform} 暂不支持鼠标移动`);
+          // 其他平台暂不支持
           resolve();
         }
       } catch (error) {
