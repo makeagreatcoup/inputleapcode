@@ -52,16 +52,9 @@ class InputCapture extends EventEmitter {
     // macOS需要辅助功能权限
     console.log('检查macOS辅助功能权限...');
     try {
-      const { execSync } = require('child_process');
-      // 尝试测试权限
-      execSync('osascript -e \'tell application "System Events" to get the position of the mouse\'', { encoding: 'utf8' });
-      console.log('macOS辅助功能权限检查通过');
+      console.log('macOS辅助功能权限检查跳过');
     } catch (error) {
-      console.error('macOS辅助功能权限检查失败:', error);
-      console.log('请手动授予应用辅助功能权限：');
-      console.log('1. 打开系统偏好设置 > 安全性与隐私 > 隐私');
-      console.log('2. 选择"辅助功能"');
-      console.log('3. 添加并勾选您的应用');
+      console.warn('macOS辅助功能权限检查失败');
     }
   }
 
@@ -205,6 +198,54 @@ class InputCapture extends EventEmitter {
             bottom: bottom
           };
         }
+      } else if (this.platform === 'win32') {
+        // Windows获取真实屏幕尺寸
+        const { execSync } = require('child_process');
+        try {
+          // 尝试获取虚拟屏幕（多显示器支持）
+          const result = execSync('powershell -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; Write-Host X=$($b.X) Y=$($b.Y) W=$($b.Width) H=$($b.Height)"', { encoding: 'utf8', shell: 'cmd.exe' });
+          const match = result.match(/X=(\-?\d+)\s+Y=(\-?\d+)\s+W=(\d+)\s+H=(\d+)/);
+          if (match) {
+            const left = parseInt(match[1]);
+            const top = parseInt(match[2]);
+            const width = parseInt(match[3]);
+            const height = parseInt(match[4]);
+            console.log(`[InputCapture] Windows虚拟屏幕边界: Left=${left}, Top=${top}, Width=${width}, Height=${height}`);
+            return {
+              width: width,
+              height: height,
+              left: left,
+              top: top,
+              right: left + width,
+              bottom: top + height
+            };
+          }
+        } catch (e) {
+          console.warn('[InputCapture] 获取虚拟屏幕失败，尝试主屏幕:', e);
+        }
+
+        // 备用：获取主屏幕
+        try {
+          const result = execSync('powershell -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; Write-Host X=$($b.X) Y=$($b.Y) W=$($b.Width) H=$($b.Height)"', { encoding: 'utf8', shell: 'cmd.exe' });
+          const match = result.match(/X=(\-?\d+)\s+Y=(\-?\d+)\s+W=(\d+)\s+H=(\d+)/);
+          if (match) {
+            const left = parseInt(match[1]);
+            const top = parseInt(match[2]);
+            const width = parseInt(match[3]);
+            const height = parseInt(match[4]);
+            console.log(`[InputCapture] Windows主屏幕边界: Left=${left}, Top=${top}, Width=${width}, Height=${height}`);
+            return {
+              width: width,
+              height: height,
+              left: left,
+              top: top,
+              right: left + width,
+              bottom: top + height
+            };
+          }
+        } catch (e) {
+          console.error('[InputCapture] 获取主屏幕失败:', e);
+        }
       }
       
       // 默认屏幕尺寸
@@ -329,48 +370,39 @@ class InputCapture extends EventEmitter {
           });
           
         } else if (this.platform === 'darwin') {
-          // macOS使用AppleScript移动鼠标
-          const { execSync } = require('child_process');
-          try {
-            console.log(`[InputCapture] 尝试使用AppleScript移动鼠标到 (${x}, ${y})`);
-            // 使用正确的AppleScript语法移动鼠标
-            const script = `
-              tell application "System Events"
-                set frontmost to true
-                tell process "System Events"
-                  click at {${x}, ${y}}
-                end tell
-              end tell
-            `;
-            execSync(`osascript -e '${script}'`, { encoding: 'utf8' });
-            console.log(`[InputCapture] macOS鼠标移动到 (${x}, ${y}) 完成`);
-            resolve();
-          } catch (error) {
-            console.error('[InputCapture] macOS AppleScript鼠标移动失败:', error);
-            console.log('[InputCapture] 提示：请确保已授予应用辅助功能权限');
-            
-            // 尝试使用备用方法
+          const { execSync, spawnSync } = require('child_process');
+          let moved = false;
+          if (process.env.INPUTLEAP_USE_APPLESCRIPT === '1') {
             try {
-              console.log(`[InputCapture] 尝试使用cliclick备用方法移动鼠标到 (${x}, ${y})`);
-              execSync(`cliclick c:${x},${y}`, { encoding: 'utf8' });
-              console.log(`[InputCapture] 使用cliclick备用方法移动鼠标到 (${x}, ${y}) 完成`);
-              resolve();
-            } catch (cliclickError) {
-              console.warn('[InputCapture] cliclick不可用，尝试Python备用方法');
+              const script = `tell application "System Events" to tell process "System Events" to click at {${x}, ${y}}`;
+              execSync(`osascript -e '${script}'`, { encoding: 'utf8' });
+              moved = true;
+            } catch (error) {
+              console.warn('[InputCapture] macOS AppleScript鼠标移动失败');
             }
-            
-            // Python备用方案
+          }
+          if (!moved) {
             try {
-              // 使用Python的PyAutoGUI库作为备用方案
+              const output = execSync(`cliclick m:${x},${y}`, { encoding: 'utf8' });
+              if (output && (output.includes('Usage:') || output.includes('cliclick'))) {
+                // 如果输出包含用法说明，说明命令可能不支持
+                throw new Error('cliclick m command failed');
+              }
+              moved = true;
+            } catch (e) {
+              console.warn('[InputCapture] cliclick m移动失败，尝试备用方案:', e.message);
+            }
+          }
+          if (!moved) {
+            try {
               const pythonScript = `
 import sys
 try:
-    from Quartz.CoreGraphics import CGEventCreateMouseEvent, CGEventPost, kCGEventMouseMoved, kCGEventSourceStateCombinedSessionState, kCGEventSourceStateHIDSystemState, kCGMouseButtonLeft, kCGMouseEventSourceStateID
+    from Quartz.CoreGraphics import CGEventCreateMouseEvent, CGEventPost, kCGEventMouseMoved, kCGHIDEventTap, kCGMouseButtonLeft
     from Quartz.CoreGraphics import CGPoint
     import Cocoa
-    # 创建鼠标移动事件
-    event = CGEventCreateMouseEvent(None, kCGEventMouseMoved, CGPoint(${x}, ${y}), kCGMouseButtonLeft, 0)
-    CGEventPost(kCGEventSourceStateCombinedSessionState, event)
+    event = CGEventCreateMouseEvent(None, kCGEventMouseMoved, CGPoint(${x}, ${y}), kCGMouseButtonLeft)
+    CGEventPost(kCGHIDEventTap, event)
     print("Python鼠标移动成功")
 except ImportError:
     print("需要安装PyObjC库: pip install PyObjC")
@@ -379,15 +411,20 @@ except Exception as e:
     print(f"Python鼠标移动失败: {e}")
     sys.exit(1)
 `;
-              execSync(`python3 -c "${pythonScript}"`, { encoding: 'utf8' });
-              console.log(`[InputCapture] 使用Python备用方法移动鼠标到 (${x}, ${y}) 完成`);
-              resolve();
+              const py = spawnSync('python3', ['-c', pythonScript], { encoding: 'utf8' });
+              if (py.status !== 0) {
+                throw new Error(py.stderr || py.stdout || 'Python备用方法执行失败');
+              }
+              moved = true;
             } catch (pythonError) {
               console.error('[InputCapture] Python备用方法也失败:', pythonError);
-              console.log('[InputCapture] 请安装cliclick: brew install cliclick');
-              console.log('[InputCapture] 或安装PyObjC: pip3 install PyObjC');
               reject(new Error('所有鼠标移动方法都失败'));
+              return;
             }
+          }
+          if (moved) {
+            console.log(`[InputCapture] macOS鼠标移动到 (${x}, ${y}) 完成`);
+            resolve();
           }
         } else {
           // 其他平台

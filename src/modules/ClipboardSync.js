@@ -83,7 +83,12 @@ class ClipboardSync extends EventEmitter {
   }
 
   hasContentChanged(newContent) {
-    if (!this.lastClipboardContent || !newContent) {
+    // 没有新内容则不触发
+    if (!newContent) {
+      return false;
+    }
+    // 第一次有内容
+    if (!this.lastClipboardContent) {
       return true;
     }
     
@@ -108,18 +113,7 @@ class ClipboardSync extends EventEmitter {
       // 简化版剪贴板内容获取
       // 实际应用中应使用clipboard库
       
-      // 只在实际有剪贴板变化时返回内容，避免随机生成
-      if (this.lastClipboardContent === null && Math.random() > 0.8) {
-        // 初始化时偶尔返回内容
-        const mockText = '示例剪贴板内容 ' + Date.now();
-        return {
-          type: 'text',
-          data: mockText,
-          timestamp: Date.now()
-        };
-      }
-      
-      // 正常情况下返回null，表示没有变化
+      // 暂不模拟剪贴板内容，实际应用应接入系统剪贴板
       return null;
     } catch (error) {
       console.error('获取剪贴板内容失败:', error);
