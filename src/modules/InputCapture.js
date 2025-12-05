@@ -372,35 +372,14 @@ class InputCapture extends EventEmitter {
         } else if (this.platform === 'darwin') {
           const { execSync, spawnSync } = require('child_process');
           let moved = false;
-          if (process.env.INPUTLEAP_USE_APPLESCRIPT === '1') {
-            try {
-              const script = `tell application "System Events" to tell process "System Events" to click at {${x}, ${y}}`;
-              execSync(`osascript -e '${script}'`, { encoding: 'utf8' });
-              moved = true;
-            } catch (error) {
-              console.warn('[InputCapture] macOS AppleScript鼠标移动失败');
-            }
-          }
-          if (!moved) {
-            try {
-              const output = execSync(`cliclick m:${x},${y}`, { encoding: 'utf8' });
-              if (output && (output.includes('Usage:') || output.includes('cliclick'))) {
-                // 如果输出包含用法说明，说明命令可能不支持
-                throw new Error('cliclick m command failed');
-              }
-              moved = true;
-            } catch (e) {
-              console.warn('[InputCapture] cliclick m移动失败，尝试备用方案:', e.message);
-            }
-          }
-          if (!moved) {
-            try {
-              const pythonScript = `
+
+          // 优先级1: Python Quartz方案 (最可靠)
+          try {
+            const pythonScript = `
 import sys
 try:
     from Quartz.CoreGraphics import CGEventCreateMouseEvent, CGEventPost, kCGEventMouseMoved, kCGHIDEventTap, kCGMouseButtonLeft
     from Quartz.CoreGraphics import CGPoint
-    import Cocoa
     event = CGEventCreateMouseEvent(None, kCGEventMouseMoved, CGPoint(${x}, ${y}), kCGMouseButtonLeft)
     CGEventPost(kCGHIDEventTap, event)
     print("Python鼠标移动成功")
@@ -411,20 +390,44 @@ except Exception as e:
     print(f"Python鼠标移动失败: {e}")
     sys.exit(1)
 `;
-              const py = spawnSync('python3', ['-c', pythonScript], { encoding: 'utf8' });
-              if (py.status !== 0) {
-                throw new Error(py.stderr || py.stdout || 'Python备用方法执行失败');
-              }
+            const py = spawnSync('python3', ['-c', pythonScript], { encoding: 'utf8' });
+            if (py.status === 0 && py.stdout && py.stdout.includes('成功')) {
               moved = true;
-            } catch (pythonError) {
-              console.error('[InputCapture] Python备用方法也失败:', pythonError);
-              reject(new Error('所有鼠标移动方法都失败'));
-              return;
+              console.log(`[InputCapture] Python Quartz移动鼠标到 (${x}, ${y}) 成功`);
+            }
+          } catch (pythonError) {
+            console.warn('[InputCapture] Python Quartz方案失败:', pythonError.message);
+          }
+
+          // 优先级2: cliclick c:命令 (移动并点击，然后恢复状态)
+          if (!moved) {
+            try {
+              // 使用c:命令而不是m:命令，因为c:命令可以移动鼠标
+              execSync(`cliclick c:${x},${y}`, { encoding: 'utf8' });
+              moved = true;
+              console.log(`[InputCapture] cliclick移动鼠标到 (${x}, ${y}) 成功`);
+            } catch (e) {
+              console.warn('[InputCapture] cliclick移动失败:', e.message);
             }
           }
+
+          // 优先级3: AppleScript方案 (如果启用)
+          if (!moved && process.env.INPUTLEAP_USE_APPLESCRIPT === '1') {
+            try {
+              const script = `tell application "System Events" to tell process "System Events" to click at {${x}, ${y}}`;
+              execSync(`osascript -e '${script}'`, { encoding: 'utf8' });
+              moved = true;
+              console.log(`[InputCapture] AppleScript移动鼠标到 (${x}, ${y}) 成功`);
+            } catch (error) {
+              console.warn('[InputCapture] AppleScript鼠标移动失败:', error.message);
+            }
+          }
+
           if (moved) {
             console.log(`[InputCapture] macOS鼠标移动到 (${x}, ${y}) 完成`);
             resolve();
+          } else {
+            reject(new Error('所有鼠标移动方法都失败'));
           }
         } else {
           // 其他平台
