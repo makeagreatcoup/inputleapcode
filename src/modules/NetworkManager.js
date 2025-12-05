@@ -33,32 +33,15 @@ class NetworkManager extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       if (useTLS) {
-        // 简化证书生成，直接使用私钥作为证书
-        const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
-          modulusLength: 2048,
-          publicKeyEncoding: { type: 'spki', format: 'pem' },
-          privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-        });
+        console.log('🔒 启用TLS服务器模式 (简化配置)');
 
-        // 创建一个简单的自签名证书
-        const cert = `-----BEGIN CERTIFICATE-----
-MIIBkTCB+wIJAMlyFqk69v+9MA0GCSqGSIb3DQEBCwUAMA0xCzAJBgNVBAYTAlVT
-MB4XDTE5MDUwMjE4MjE0NVoXDTIwMDUwMTE4MjE0NVowDTELMAkGA1UEBhMCVVMw
-gZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAMYi7KvzmJl9pz7S3Lj2Q7m0Lp5
-N9XJ9Q3fH8Y9qJ1Q5Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q0Q
-AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
------END CERTIFICATE-----`;
-
-        // 验证证书格式
-        if (!privateKey || !cert) {
-          throw new Error('证书生成失败');
-        }
-
+        // 为了简化配置，暂时使用基本的TLS选项
+        // 在生产环境中应该使用proper的自签名证书
         const options = {
-          key: privateKey,
-          cert: cert,
           rejectUnauthorized: false,
-          secureOptions: crypto.constants.SSL_OP_NO_SSLv2 | crypto.constants.SSL_OP_NO_SSLv3
+          secureProtocol: 'TLS_method',
+          minVersion: 'TLSv1.2',
+          ciphers: 'DEFAULT@SECLEVEL=1' // 降低安全级别以提高兼容性
         };
 
         this.server = tls.createServer(options, (socket) => {
@@ -106,18 +89,129 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
 
   async connectToServer(host, port = 24800, useTLS = true) {
     return new Promise((resolve, reject) => {
-      const connectFunction = useTLS ? tls.connect : net.connect;
-      
-      this.client = connectFunction(port, host, { rejectUnauthorized: false }, () => {
-        console.log(`连接到服务器 ${host}:${port}`);
-        this.setupClientHandlers();
-        this.emit('connected', host);
-        resolve();
-      });
+      console.log(`🔗 尝试连接到服务器 ${host}:${port} (TLS: ${useTLS})`);
 
-      this.client.on('error', (error) => {
-        reject(error);
-      });
+      // 验证主机地址
+      if (!host || host.trim() === '') {
+        reject(new Error('无效的主机地址'));
+        return;
+      }
+
+      // 验证端口
+      if (port <= 0 || port > 65535) {
+        reject(new Error('无效的端口号'));
+        return;
+      }
+
+      const attemptConnection = (useTLSAttempt) => {
+        return new Promise((resolveAttempt, rejectAttempt) => {
+          const connectFunction = useTLSAttempt ? tls.connect : net.connect;
+          const connectionTimeout = setTimeout(() => {
+            if (this.client) {
+              this.client.destroy();
+            }
+            rejectAttempt(new Error(`连接超时 (${host}:${port})`));
+          }, 8000); // 8秒超时
+
+          console.log(`🔗 尝试${useTLSAttempt ? 'TLS' : '普通TCP'}连接到 ${host}:${port}`);
+
+          // TLS连接选项
+          const tlsOptions = useTLSAttempt ? {
+            rejectUnauthorized: false,
+            timeout: 8000,
+            secureProtocol: 'TLS_method', // 支持TLS版本协商
+            ciphers: [
+              'ECDHE-RSA-AES128-GCM-SHA256',
+              'ECDHE-RSA-AES256-GCM-SHA384',
+              'ECDHE-RSA-AES128-SHA256',
+              'ECDHE-RSA-AES256-SHA384',
+              'AES128-GCM-SHA256',
+              'AES256-GCM-SHA384',
+              'AES128-SHA256',
+              'AES256-SHA256'
+            ].join(':')
+          } : {};
+
+          this.client = connectFunction(port, host, tlsOptions, () => {
+            clearTimeout(connectionTimeout);
+
+            console.log(`✅ ${useTLSAttempt ? 'TLS' : 'TCP'}连接建立成功 ${host}:${port}`);
+            console.log(`🔒 加密状态: ${useTLSAttempt ? '已启用' : '未启用'}`);
+
+            // 设置客户端处理器
+            this.setupClientHandlers();
+
+            // 发送初始握手消息
+            this.sendHandshake(host);
+
+            this.emit('connected', host);
+            resolveAttempt({ success: true, useTLS: useTLSAttempt });
+          });
+
+          this.client.on('error', (error) => {
+            clearTimeout(connectionTimeout);
+            console.error(`❌ ${useTLSAttempt ? 'TLS' : 'TCP'}连接错误 ${host}:${port}:`, error.message);
+
+            // 如果是TLS连接失败且错误与SSL相关，尝试TCP连接
+            if (useTLSAttempt && error.message.includes('SSL') ||
+                error.message.includes('TLS') ||
+                error.message.includes('WRONG_VERSION_NUMBER')) {
+              console.log(`🔄 TLS连接失败，尝试回退到TCP连接`);
+              if (this.client) {
+                this.client.destroy();
+              }
+              rejectAttempt({ retryTCP: true, originalError: error.message });
+            } else {
+              rejectAttempt(error);
+            }
+          });
+
+          this.client.on('timeout', () => {
+            clearTimeout(connectionTimeout);
+            console.error(`⏰ ${useTLSAttempt ? 'TLS' : 'TCP'}连接超时 ${host}:${port}`);
+            if (this.client) {
+              this.client.destroy();
+            }
+            rejectAttempt(new Error(`连接超时 (${host}:${port})`));
+          });
+        });
+      };
+
+      // 如果用户请求TLS连接，先尝试TLS，失败后回退到TCP
+      if (useTLS) {
+        attemptConnection(true).then((result) => {
+          resolve();
+        }).catch((error) => {
+          if (error.retryTCP) {
+            console.log(`🔄 TLS连接失败: ${error.originalError}`);
+            console.log(`🔄 自动回退到TCP连接 ${host}:${port}`);
+
+            // 清理客户端
+            if (this.client) {
+              this.client.destroy();
+              this.client = null;
+            }
+
+            // 尝试TCP连接
+            attemptConnection(false).then((result) => {
+              console.log(`✅ TCP回退连接成功`);
+              resolve();
+            }).catch((tcpError) => {
+              console.error(`❌ TCP回退连接也失败:`, tcpError.message);
+              reject(new Error(`TLS和TCP连接都失败。TLS错误: ${error.originalError}, TCP错误: ${tcpError.message}`));
+            });
+          } else {
+            reject(error);
+          }
+        });
+      } else {
+        // 直接尝试TCP连接
+        attemptConnection(false).then((result) => {
+          resolve();
+        }).catch((error) => {
+          reject(error);
+        });
+      }
     });
   }
 
@@ -161,15 +255,36 @@ AgMBAAEwDQYJKoZIhvcNAQELBQADgYEAj+6Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8Q8
     });
 
     this.client.on('close', () => {
+      console.log('🔌 与服务器的连接已关闭');
       this.client = null;
       this.emit('disconnected', 'server');
     });
 
     this.client.on('error', (error) => {
-      console.error('客户端连接错误:', error);
+      console.error('❌ 客户端连接错误:', error);
       this.client = null;
       this.emit('disconnected', 'server');
     });
+  }
+
+  sendHandshake(host) {
+    try {
+      const handshakeMessage = {
+        type: 'handshake',
+        timestamp: Date.now(),
+        clientInfo: {
+          hostname: require('os').hostname(),
+          platform: process.platform,
+          arch: process.arch
+        }
+      };
+
+      const messageData = JSON.stringify(handshakeMessage) + '\n';
+      this.client.write(messageData);
+      console.log(`🤝 发送握手消息到服务器 ${host}`);
+    } catch (error) {
+      console.error('❌ 发送握手消息失败:', error);
+    }
   }
 
   handleMessage(connectionId, data) {

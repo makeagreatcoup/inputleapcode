@@ -1,6 +1,7 @@
 const EventEmitter = require('events');
 const os = require('os');
 const crypto = require('crypto');
+const { createBonjour } = require('bonjour-service');
 
 class DeviceDiscovery extends EventEmitter {
   constructor() {
@@ -13,6 +14,8 @@ class DeviceDiscovery extends EventEmitter {
     this.deviceName = this.getDeviceName();
     this.serviceType = 'inputleap';
     this.servicePort = 24800;
+    this.isDiscovering = false;
+    this.discoveryTimeout = null;
   }
 
   getDeviceName() {
@@ -26,20 +29,47 @@ class DeviceDiscovery extends EventEmitter {
   async startAnnouncement(port = 24800, useTLS = true) {
     try {
       this.servicePort = port;
-      
-      // 简化版服务公告
-      console.log(`Device discovery service started: ${this.deviceName}`);
-      this.emit('announcement-started', {
+
+      // 初始化 Bonjour
+      this.bonjour = createBonjour();
+
+      // 获取设备配置
+      const deviceConfig = this.getDeviceConfig();
+
+      // 发布 mDNS 服务
+      this.service = this.bonjour.publish({
         name: this.deviceName,
+        type: this.serviceType,
         port: port,
-        useTLS: useTLS
+        txt: {
+          version: '1.0.0',
+          platform: deviceConfig.platform,
+          arch: deviceConfig.arch,
+          deviceId: deviceConfig.id,
+          useTLS: useTLS.toString(),
+          timestamp: Date.now().toString()
+        }
       });
-      
+
+      this.service.on('up', () => {
+        console.log(`mDNS 服务已发布: ${this.deviceName} (${this.serviceType})`);
+        this.emit('announcement-started', {
+          name: this.deviceName,
+          port: port,
+          useTLS: useTLS
+        });
+      });
+
+      this.service.on('error', (err) => {
+        console.error('mDNS 服务发布失败:', err);
+        this.emit('announcement-error', err);
+      });
+
       // 定期重新发布公告（确保服务可见性）
       this.startPeriodicAnnouncement();
-      
+
       return { success: true };
-      
+
     } catch (error) {
       console.error('启动设备公告失败:', error);
       return { success: false, error: error.message };
@@ -54,68 +84,94 @@ class DeviceDiscovery extends EventEmitter {
   }
 
   async discover(timeout = 10000) {
-    try {
-      // 清理之前的发现结果
-      this.discoveredDevices.clear();
-      
-      // 简化版设备发现（模拟）
-      console.log('Starting device discovery...');
-      
-      // 模拟发现设备
-      const mockDevices = [
-        {
-          id: 'mock-device-1',
-          name: 'Mock Device 1 (Windows)',
-          host: '192.168.1.100',
-          port: 24800,
-          platform: 'win32',
-          arch: 'x64',
-          version: '1.0.0',
-          useTLS: true,
-          lastSeen: Date.now(),
-          status: 'online'
-        },
-        {
-          id: 'mock-device-2',
-          name: 'Mock Device 2 (macOS)',
-          host: '192.168.1.101',
-          port: 24800,
-          platform: 'darwin',
-          arch: 'x64',
-          version: '1.0.0',
-          useTLS: true,
-          lastSeen: Date.now(),
-          status: 'online'
+    return new Promise((resolve, reject) => {
+      try {
+        // 清理之前的发现结果
+        this.discoveredDevices.clear();
+        this.isDiscovering = true;
+
+        // 初始化 Bonjour（如果尚未初始化）
+        if (!this.bonjour) {
+          this.bonjour = createBonjour();
         }
-      ];
-      
-      // 模拟异步发现过程
-      setTimeout(() => {
-        mockDevices.forEach(device => {
-          this.discoveredDevices.set(device.id, device);
-          this.emit('device-found', device);
+
+        console.log('开始 mDNS 设备发现...');
+
+        // 开始浏览 InputLeap 服务
+        this.browser = this.bonjour.find({ type: this.serviceType }, (service) => {
+          if (service.name === this.deviceName) {
+            // 忽略自己的服务
+            return;
+          }
+
+          const deviceInfo = {
+            id: service.txt?.deviceId || service.name,
+            name: service.name,
+            host: service.addresses?.[0] || service.host,
+            port: service.port,
+            platform: service.txt?.platform || 'unknown',
+            arch: service.txt?.arch || 'unknown',
+            version: service.txt?.version || '1.0.0',
+            useTLS: service.txt?.useTLS === 'true',
+            lastSeen: Date.now(),
+            status: 'online',
+            rawService: service
+          };
+
+          // 过滤重复设备
+          if (!this.discoveredDevices.has(deviceInfo.id)) {
+            this.discoveredDevices.set(deviceInfo.id, deviceInfo);
+            console.log(`发现设备: ${deviceInfo.name} (${deviceInfo.host}:${deviceInfo.port})`);
+            this.emit('device-found', deviceInfo);
+          }
         });
-      }, 1000);
-      
-      // 设置超时
-      const discoveryPromise = new Promise((resolve) => {
-        setTimeout(() => {
+
+        this.browser.on('up', (service) => {
+          console.log(`设备上线: ${service.name}`);
+        });
+
+        this.browser.on('down', (service) => {
+          console.log(`设备下线: ${service.name}`);
+          // 从发现列表中移除
+          const deviceId = service.txt?.deviceId || service.name;
+          this.removeDevice(deviceId);
+        });
+
+        this.browser.on('error', (err) => {
+          console.error('mDNS 浏览错误:', err);
+        });
+
+        this.emit('discovery-started');
+
+        // 设置发现超时
+        this.discoveryTimeout = setTimeout(() => {
           this.stopDiscovery();
+          console.log(`设备发现完成，找到 ${this.discoveredDevices.size} 个设备`);
           resolve(Array.from(this.discoveredDevices.values()));
         }, timeout);
-      });
 
-      this.emit('discovery-started');
-      return await discoveryPromise;
-      
-    } catch (error) {
-      console.error('Device discovery failed:', error);
-      return [];
-    }
+      } catch (error) {
+        console.error('设备发现失败:', error);
+        this.isDiscovering = false;
+        reject(error);
+      }
+    });
   }
 
   stopDiscovery() {
-    console.log('Stopping device discovery');
+    this.isDiscovering = false;
+
+    if (this.discoveryTimeout) {
+      clearTimeout(this.discoveryTimeout);
+      this.discoveryTimeout = null;
+    }
+
+    if (this.browser) {
+      this.browser.stop();
+      this.browser = null;
+    }
+
+    console.log('设备发现已停止');
     this.emit('discovery-stopped');
   }
 
@@ -124,14 +180,24 @@ class DeviceDiscovery extends EventEmitter {
       clearInterval(this.announcementInterval);
       this.announcementInterval = null;
     }
-    
-    console.log('Stopping device announcement');
+
+    if (this.service) {
+      this.service.stop();
+      this.service = null;
+    }
+
+    console.log('设备公告已停止');
     this.emit('announcement-stopped');
   }
 
   stop() {
     this.stopDiscovery();
     this.stopAnnouncement();
+
+    if (this.bonjour) {
+      this.bonjour.destroy();
+      this.bonjour = null;
+    }
   }
 
   getDeviceId() {

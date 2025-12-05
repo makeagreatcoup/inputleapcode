@@ -181,28 +181,54 @@ class InputLeapUI {
 
   async connectToServer() {
     try {
+      // 验证输入
+      const host = this.serverHostEl.value.trim();
+      const port = parseInt(this.clientPortEl.value);
+
+      if (!host) {
+        this.showNotification('请输入服务器地址', 'warning');
+        return;
+      }
+
+      if (isNaN(port) || port <= 0 || port > 65535) {
+        this.showNotification('请输入有效的端口号 (1-65535)', 'warning');
+        return;
+      }
+
+      console.log('🔗 开始连接流程:', { host, port, tls: this.clientTlsEl.checked });
+
       this.updateConnectionStatus('connecting');
-      
+      this.connectBtnEl.disabled = true;
+      this.connectBtnEl.innerHTML = '<i class="bi bi-hourglass-split"></i> 连接中...';
+
       const config = {
-        host: this.serverHostEl.value,
-        port: parseInt(this.clientPortEl.value),
+        host: host,
+        port: port,
         useTLS: this.clientTlsEl.checked
       };
-      
+
+      console.log('📤 发送连接请求到主进程:', config);
       const result = await ipcRenderer.invoke('connect-to-server', config);
-      
+
+      console.log('📥 收到连接结果:', result);
+
       if (result.success) {
         this.updateConnectionStatus('connected');
         this.connectBtnEl.classList.add('d-none');
         this.disconnectBtnEl.classList.remove('d-none');
-        this.showNotification('连接成功', 'success');
+        this.showNotification(`✅ 连接成功: ${host}:${port}`, 'success');
       } else {
         this.updateConnectionStatus('disconnected');
-        this.showNotification(`连接失败: ${result.error}`, 'error');
+        this.showNotification(`❌ 连接失败: ${result.error}`, 'error');
       }
     } catch (error) {
+      console.error('💥 连接过程中发生异常:', error);
       this.updateConnectionStatus('disconnected');
-      this.showNotification(`连接失败: ${error.message}`, 'error');
+      this.showNotification(`💥 连接失败: ${error.message}`, 'error');
+    } finally {
+      // 恢复按钮状态
+      this.connectBtnEl.disabled = false;
+      this.connectBtnEl.innerHTML = '<i class="bi bi-link-45deg"></i> 连接';
     }
   }
 

@@ -208,10 +208,16 @@ class InputLeapApp {
     // 连接到服务器
     ipcMain.handle('connect-to-server', async (event, config) => {
       try {
+        console.log('🔗 开始连接到服务器:', config);
         this.isServer = false;
-        await this.networkManager.connectToServer(config.host, config.port, false); // 暂时禁用TLS
+
+        // 使用用户配置的TLS设置
+        await this.networkManager.connectToServer(config.host, config.port, config.useTLS);
+
+        console.log('✅ 连接到服务器成功:', config.host);
         return { success: true };
       } catch (error) {
+        console.error('❌ 连接到服务器失败:', error);
         return { success: false, error: error.message };
       }
     });
