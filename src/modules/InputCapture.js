@@ -333,10 +333,31 @@ class InputCapture extends EventEmitter {
           const { execSync } = require('child_process');
           try {
             console.log(`[InputCapture] 尝试使用AppleScript移动鼠标到 (${x}, ${y})`);
-            execSync(`osascript -e 'tell application "System Events" to set the position of the mouse to {${x}, ${y}}'`, { encoding: 'utf8' });
+            // 使用正确的AppleScript语法移动鼠标
+            const script = `
+              tell application "System Events"
+                set frontmost to true
+                tell process "System Events"
+                  click at {${x}, ${y}}
+                end tell
+              end tell
+            `;
+            execSync(`osascript -e '${script}'`, { encoding: 'utf8' });
             console.log(`[InputCapture] macOS鼠标移动到 (${x}, ${y}) 完成`);
             resolve();
           } catch (error) {
+            console.log('[InputCapture] AppleScript方法失败，尝试简化版本');
+            try {
+              // 使用最基础的鼠标移动命令
+              execSync(`osascript -e 'tell application "System Events" to set frontmost to true'`, { encoding: 'utf8' });
+              // 使用系统内置的鼠标移动
+              execSync(`printf '\\033[${y};${x}H' | tput -S`, { encoding: 'utf8', shell: true });
+              console.log(`[InputCapture] 简化方法鼠标移动到 (${x}, ${y}) 完成`);
+              resolve();
+            } catch (simpleError) {
+              throw error; // 抛出原始错误，进入备用方案
+            }
+          }
             console.error('[InputCapture] macOS AppleScript鼠标移动失败:', error);
             console.log('[InputCapture] 提示：请确保已授予应用辅助功能权限');
             
@@ -346,9 +367,36 @@ class InputCapture extends EventEmitter {
               execSync(`cliclick c:${x},${y}`, { encoding: 'utf8' });
               console.log(`[InputCapture] 使用cliclick备用方法移动鼠标到 (${x}, ${y}) 完成`);
               resolve();
-            } catch (fallbackError) {
-              console.error('[InputCapture] 备用鼠标移动方法也失败:', fallbackError);
-              reject(fallbackError);
+            } catch (cliclickError) {
+              console.warn('[InputCapture] cliclick不可用，尝试Python备用方法');
+              try {
+                // 使用Python的PyAutoGUI库作为备用方案
+                const pythonScript = `
+import sys
+try:
+    from Quartz.CoreGraphics import CGEventCreateMouseEvent, CGEventPost, kCGEventMouseMoved, kCGEventSourceStateCombinedSessionState, kCGEventSourceStateHIDSystemState, kCGMouseButtonLeft, kCGMouseEventSourceStateID
+    from Quartz.CoreGraphics import CGPoint
+    import Cocoa
+    # 创建鼠标移动事件
+    event = CGEventCreateMouseEvent(None, kCGEventMouseMoved, CGPoint(${x}, ${y}), kCGMouseButtonLeft, 0)
+    CGEventPost(kCGEventSourceStateCombinedSessionState, event)
+    print("Python鼠标移动成功")
+except ImportError:
+    print("需要安装PyObjC库: pip install PyObjC")
+    sys.exit(1)
+except Exception as e:
+    print(f"Python鼠标移动失败: {e}")
+    sys.exit(1)
+`;
+                execSync(`python3 -c "${pythonScript}"`, { encoding: 'utf8' });
+                console.log(`[InputCapture] 使用Python备用方法移动鼠标到 (${x}, ${y}) 完成`);
+                resolve();
+              } catch (pythonError) {
+                console.error('[InputCapture] Python备用方法也失败:', pythonError);
+                console.log('[InputCapture] 请安装cliclick: brew install cliclick');
+                console.log('[InputCapture] 或安装PyObjC: pip3 install PyObjC');
+                reject(new Error('所有鼠标移动方法都失败'));
+              }
             }
           }
         } else {
