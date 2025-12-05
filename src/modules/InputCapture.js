@@ -369,9 +369,12 @@ class InputCapture extends EventEmitter {
               resolve();
             } catch (cliclickError) {
               console.warn('[InputCapture] cliclick不可用，尝试Python备用方法');
-              try {
-                // 使用Python的PyAutoGUI库作为备用方案
-                const pythonScript = `
+            }
+            
+            // Python备用方案
+            try {
+              // 使用Python的PyAutoGUI库作为备用方案
+              const pythonScript = `
 import sys
 try:
     from Quartz.CoreGraphics import CGEventCreateMouseEvent, CGEventPost, kCGEventMouseMoved, kCGEventSourceStateCombinedSessionState, kCGEventSourceStateHIDSystemState, kCGMouseButtonLeft, kCGMouseEventSourceStateID
@@ -388,15 +391,14 @@ except Exception as e:
     print(f"Python鼠标移动失败: {e}")
     sys.exit(1)
 `;
-                execSync(`python3 -c "${pythonScript}"`, { encoding: 'utf8' });
-                console.log(`[InputCapture] 使用Python备用方法移动鼠标到 (${x}, ${y}) 完成`);
-                resolve();
-              } catch (pythonError) {
-                console.error('[InputCapture] Python备用方法也失败:', pythonError);
-                console.log('[InputCapture] 请安装cliclick: brew install cliclick');
-                console.log('[InputCapture] 或安装PyObjC: pip3 install PyObjC');
-                reject(new Error('所有鼠标移动方法都失败'));
-              }
+              execSync(`python3 -c "${pythonScript}"`, { encoding: 'utf8' });
+              console.log(`[InputCapture] 使用Python备用方法移动鼠标到 (${x}, ${y}) 完成`);
+              resolve();
+            } catch (pythonError) {
+              console.error('[InputCapture] Python备用方法也失败:', pythonError);
+              console.log('[InputCapture] 请安装cliclick: brew install cliclick');
+              console.log('[InputCapture] 或安装PyObjC: pip3 install PyObjC');
+              reject(new Error('所有鼠标移动方法都失败'));
             }
           }
         } else {
