@@ -346,18 +346,6 @@ class InputCapture extends EventEmitter {
             console.log(`[InputCapture] macOS鼠标移动到 (${x}, ${y}) 完成`);
             resolve();
           } catch (error) {
-            console.log('[InputCapture] AppleScript方法失败，尝试简化版本');
-            try {
-              // 使用最基础的鼠标移动命令
-              execSync(`osascript -e 'tell application "System Events" to set frontmost to true'`, { encoding: 'utf8' });
-              // 使用系统内置的鼠标移动
-              execSync(`printf '\\033[${y};${x}H' | tput -S`, { encoding: 'utf8', shell: true });
-              console.log(`[InputCapture] 简化方法鼠标移动到 (${x}, ${y}) 完成`);
-              resolve();
-            } catch (simpleError) {
-              throw error; // 抛出原始错误，进入备用方案
-            }
-          }
             console.error('[InputCapture] macOS AppleScript鼠标移动失败:', error);
             console.log('[InputCapture] 提示：请确保已授予应用辅助功能权限');
             
