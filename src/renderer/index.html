@@ -249,6 +249,17 @@
                                             <input type="text" class="form-control" id="serverHost" placeholder="192.168.1.100">
                                         </div>
                                         <div class="mb-3">
+                                            <label for="serverHistory" class="form-label">历史连接记录</label>
+                                            <div class="d-flex">
+                                                <select class="form-select me-2" id="serverHistory">
+                                                    <option value="">选择历史连接...</option>
+                                                </select>
+                                                <button class="btn btn-outline-secondary" type="button" id="clearHistoryBtn" style="display: none;" title="清除历史记录">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="mb-3">
                                             <label for="clientPort" class="form-label">端口</label>
                                             <input type="number" class="form-control" id="clientPort" value="24800">
                                         </div>

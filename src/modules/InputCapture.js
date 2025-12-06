@@ -7,18 +7,31 @@ class InputCapture extends EventEmitter {
     this.isCapturing = false;
     this.screenBounds = this.getScreenBounds();
     this.platform = os.platform();
-    
+
     // 鼠标移动阈值，避免过于频繁的事件
-    this.mouseThreshold = 1; // 降低到1像素，提高响应性
+    this.mouseThreshold = 3; // 提高阈值减少事件频率
     this.lastMousePos = { x: 0, y: 0 };
 
     // 边缘检测阈值
-    this.edgeThreshold = 5;
-    
+    this.edgeThreshold = 3;
+
     // 防止循环移动的标志
     this.isRemoteMoving = false;
     this.remoteMoveTimeout = null;
-    
+
+    // 边缘跳转状态管理
+    this.edgeState = {
+      isAtEdge: false,
+      lastEdge: null,
+      isTransferred: false, // 是否已经跳转到远程设备
+      canTransfer: true,    // 是否允许再次跳转
+      lastTransferTime: 0   // 上次跳转时间，防止频繁跳转
+    };
+
+    // 性能优化
+    this.moveCounter = 0; // 移动计数器，用于性能统计
+    this.lastLogTime = 0; // 上次日志时间
+
     this.initializeCapture();
   }
 
@@ -63,14 +76,25 @@ class InputCapture extends EventEmitter {
 
   startMouseCapture() {
     this.isCapturing = true;
-    this.isAtEdge = false; // 新增：跟踪是否在边缘状态
-    this.lastEdge = null;
+    this.edgeState = {
+      isAtEdge: false,
+      lastEdge: null,
+      isTransferred: false,
+      canTransfer: true,
+      lastTransferTime: 0
+    };
+    this.moveCounter = 0;
+
+    console.log(`🎮 开始鼠标捕获，屏幕边界: ${JSON.stringify(this.screenBounds)}`);
+    console.log(`🎯 边缘检测阈值: ${this.edgeThreshold}px，移动阈值: ${this.mouseThreshold}px`);
 
     // 使用定时器检查鼠标位置
     this.mouseInterval = setInterval(() => {
       if (!this.isCapturing) return;
 
       try {
+        this.moveCounter++;
+
         // 获取真实鼠标位置
         const mousePos = this.simulateMousePos();
 
@@ -83,50 +107,110 @@ class InputCapture extends EventEmitter {
 
           // 检查鼠标是否在屏幕边缘
           const edge = this.getScreenEdge(mousePos);
+          const currentTime = Date.now();
 
-          // 状态变化处理
-          if (edge && !this.isRemoteMoving) {
-            if (!this.isAtEdge || edge !== this.lastEdge) {
-              console.log(`🎯 鼠标到达${edge}边缘，位置: (${mousePos.x}, ${mousePos.y})`);
-              this.isAtEdge = true;
-              this.lastEdge = edge;
-
-              this.emit('mouse-move', {
-                x: mousePos.x,
-                y: mousePos.y,
-                edge: edge,
-                screenBounds: this.screenBounds,
-                enterEdge: true
-              });
-            }
-          } else if (!edge && this.isAtEdge) {
-            // 鼠标离开边缘
-            console.log(`🚪 鼠标离开边缘，位置: (${mousePos.x}, ${mousePos.y})`);
-            this.isAtEdge = false;
-            this.lastEdge = null;
-
-            this.emit('mouse-move', {
-              x: mousePos.x,
-              y: mousePos.y,
-              edge: null,
-              screenBounds: this.screenBounds,
-              leaveEdge: true
-            });
-          } else if (!edge && !this.isRemoteMoving) {
-            // 普通鼠标移动（非边缘，非远程控制）
-            this.emit('mouse-move', {
-              x: mousePos.x,
-              y: mousePos.y,
-              edge: null,
-              screenBounds: this.screenBounds,
-              normalMove: true
-            });
-          }
+          // 状态变化处理 - 重新设计逻辑
+          this.handleMouseStateChange(mousePos, edge, currentTime);
         }
       } catch (error) {
         console.error('鼠标捕获错误:', error);
       }
-    }, 8); // 提高到120fps，减少延迟
+    }, 16); // 60fps，减少CPU占用和卡顿
+  }
+
+  handleMouseStateChange(mousePos, edge, currentTime) {
+    // 如果正在远程移动，不处理
+    if (this.isRemoteMoving) {
+      return;
+    }
+
+    // 性能优化：减少日志输出频率
+    const shouldLog = currentTime - this.lastLogTime > 1000; // 每秒最多输出一次日志
+
+    // 情况1: 鼠标在边缘但未跳转
+    if (edge && !this.edgeState.isTransferred) {
+      // 检查是否允许跳转（防止频繁跳转）
+      const timeSinceLastTransfer = currentTime - this.edgeState.lastTransferTime;
+      const canTransferNow = timeSinceLastTransfer > 500; // 500ms冷却时间
+
+      if (!this.edgeState.isAtEdge || edge !== this.edgeState.lastEdge) {
+        // 首次到达边缘或切换边缘
+        if (shouldLog) {
+          console.log(`🎯 鼠标到达${edge}边缘，位置: (${mousePos.x}, ${mousePos.y})`);
+          this.lastLogTime = currentTime;
+        }
+
+        this.edgeState.isAtEdge = true;
+        this.edgeState.lastEdge = edge;
+
+        // 发送边缘进入事件（但不跳转）
+        this.emit('mouse-move', {
+          x: mousePos.x,
+          y: mousePos.y,
+          edge: edge,
+          screenBounds: this.screenBounds,
+          enterEdge: true
+        });
+
+      } else if (this.edgeState.isAtEdge && canTransferNow && this.edgeState.canTransfer) {
+        // 在边缘停留一段时间且允许跳转 -> 执行跳转
+        if (shouldLog) {
+          console.log(`🚀 鼠标从${edge}边缘跳转到远程设备，位置: (${mousePos.x}, ${mousePos.y})`);
+          this.lastLogTime = currentTime;
+        }
+
+        this.edgeState.isTransferred = true;
+        this.edgeState.lastTransferTime = currentTime;
+        this.edgeState.canTransfer = false; // 暂时禁止再次跳转
+
+        // 发送跳转事件
+        this.emit('mouse-move', {
+          x: mousePos.x,
+          y: mousePos.y,
+          edge: edge,
+          screenBounds: this.screenBounds,
+          transferToRemote: true // 跳转到远程设备
+        });
+
+        // 1秒后允许再次跳转
+        setTimeout(() => {
+          this.edgeState.canTransfer = true;
+        }, 1000);
+      }
+
+    } else if (!edge) {
+      // 情况2: 鼠标不在边缘
+      if (this.edgeState.isAtEdge || this.edgeState.isTransferred) {
+        // 从边缘跳转回来
+        if (shouldLog) {
+          console.log(`🏠 鼠标回到本地屏幕，位置: (${mousePos.x}, ${mousePos.y})`);
+          this.lastLogTime = currentTime;
+        }
+
+        this.edgeState.isAtEdge = false;
+        this.edgeState.lastEdge = null;
+        this.edgeState.isTransferred = false;
+
+        // 发送返回本地事件
+        this.emit('mouse-move', {
+          x: mousePos.x,
+          y: mousePos.y,
+          edge: null,
+          screenBounds: this.screenBounds,
+          returnToLocal: true
+        });
+
+      } else {
+        // 普通本地移动 - 只有在非跳转状态下才发送
+        this.emit('mouse-move', {
+          x: mousePos.x,
+          y: mousePos.y,
+          edge: null,
+          screenBounds: this.screenBounds,
+          normalMove: true
+        });
+      }
+    }
   }
 
   stopMouseCapture() {

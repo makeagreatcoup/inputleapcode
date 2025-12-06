@@ -78,105 +78,10 @@ class InputLeapApp {
     // 接收远程鼠标移动事件
     this.networkManager.on('mouse-move', (data) => {
       try {
-        const localBounds = this.inputCapture.screenBounds;
-        let targetX, targetY;
-
-        if (data.normalMove && data.screenBounds) {
-          // 普通移动事件：需要坐标转换
-          console.log(`[客户端] 普通移动: 远程(${data.x}, ${data.y}) -> 本地屏幕`);
-
-          // 计算屏幕尺寸比例
-          const scaleX = localBounds.width / data.screenBounds.width;
-          const scaleY = localBounds.height / data.screenBounds.height;
-
-          // 转换坐标到本地屏幕
-          targetX = (data.x - data.screenBounds.left) * scaleX + localBounds.left;
-          targetY = (data.y - data.screenBounds.top) * scaleY + localBounds.top;
-
-          // 确保坐标在本地屏幕范围内
-          targetX = Math.max(localBounds.left + 10, Math.min(targetX, localBounds.right - 10));
-          targetY = Math.max(localBounds.top + 10, Math.min(targetY, localBounds.bottom - 10));
-
-        } else if (data.enterEdge) {
-          // 边缘进入事件：将鼠标放置在对应的屏幕边缘
-          console.log(`[客户端] 边缘进入: ${data.edge} 远程坐标(${data.x}, ${data.y})`);
-
-          // 保持相对位置，映射到对应的本地边缘
-          const remoteBounds = data.screenBounds || { width: 1920, height: 1080, left: 0, top: 0 };
-
-          switch (data.edge) {
-            case 'top': // 服务器上边缘 -> 客户端下边缘
-              targetY = localBounds.bottom - 10;
-              targetX = (data.x / remoteBounds.width) * localBounds.width;
-              console.log(`[客户端] 上边缘进入 -> 本地下边缘 (${targetX}, ${targetY})`);
-              break;
-            case 'bottom': // 服务器下边缘 -> 客户端上边缘
-              targetY = localBounds.top + 10;
-              targetX = (data.x / remoteBounds.width) * localBounds.width;
-              console.log(`[客户端] 下边缘进入 -> 本地上边缘 (${targetX}, ${targetY})`);
-              break;
-            case 'left': // 服务器左边缘 -> 客户端右边缘
-              targetX = localBounds.right - 10;
-              targetY = (data.y / remoteBounds.height) * localBounds.height;
-              console.log(`[客户端] 左边缘进入 -> 本地右边缘 (${targetX}, ${targetY})`);
-              break;
-            case 'right': // 服务器右边缘 -> 客户端左边缘
-              targetX = localBounds.left + 10;
-              targetY = (data.y / remoteBounds.height) * localBounds.height;
-              console.log(`[客户端] 右边缘进入 -> 本地左边缘 (${targetX}, ${targetY})`);
-              break;
-            default:
-              console.warn(`[客户端] 未知边缘: ${data.edge}`);
-              return;
-          }
-
-        } else if (data.leaveEdge) {
-          // 离开边缘事件：回到屏幕中心或安全位置
-          console.log(`[客户端] 离开边缘: ${data.lastEdge}`);
-          targetX = localBounds.left + localBounds.width / 2;
-          targetY = localBounds.top + localBounds.height / 2;
-          console.log(`[客户端] 离开边缘 -> 回到中心 (${targetX}, ${targetY})`);
-
-        } else {
-          // 兼容旧版本逻辑
-          switch (data.edge) {
-            case 'top':
-              targetY = localBounds.bottom - 10;
-              targetX = (data.x / 1920) * localBounds.width; // 假设1920宽度
-              break;
-            case 'bottom':
-              targetY = localBounds.top + 10;
-              targetX = (data.x / 1920) * localBounds.width;
-              break;
-            case 'left':
-              targetX = localBounds.right - 10;
-              targetY = (data.y / 1080) * localBounds.height; // 假设1080高度
-              break;
-            case 'right':
-              targetX = localBounds.left + 10;
-              targetY = (data.y / 1080) * localBounds.height;
-              break;
-            default:
-              console.warn(`[客户端] 未知边缘: ${data.edge}`);
-              return;
-          }
+        // 只在客户端模式下处理远程事件
+        if (!this.isServer) {
+          this.handleRemoteMouseMove(data);
         }
-
-        // 确保坐标在有效范围内
-        targetX = Math.max(localBounds.left + 5, Math.min(targetX, localBounds.right - 5));
-        targetY = Math.max(localBounds.top + 5, Math.min(targetY, localBounds.bottom - 5));
-
-        console.log(`[客户端] 移动鼠标到: (${Math.round(targetX)}, ${Math.round(targetY)})`);
-
-        // 移动鼠标
-        this.inputCapture.moveMouseTo(Math.round(targetX), Math.round(targetY))
-          .then(() => {
-            console.log(`[客户端] ✅ 鼠标移动成功`);
-          })
-          .catch((error) => {
-            console.error(`[客户端] ❌ 鼠标移动失败:`, error);
-          });
-
       } catch (error) {
         console.error(`[客户端] 处理鼠标移动事件时出错:`, error);
       }
@@ -196,7 +101,43 @@ class InputLeapApp {
     this.inputCapture = new InputCapture();
     this.inputCapture.on('mouse-move', (data) => {
       if (this.networkManager.isConnected()) {
-        this.networkManager.sendEvent('mouse-move', data);
+        // 只在服务器模式下发送鼠标事件
+        if (this.isServer) {
+          // 确定事件发送策略
+          let shouldSend = false;
+          let eventType = '';
+
+          if (data.transferToRemote) {
+            shouldSend = true;
+            eventType = '跳转到远程';
+          } else if (data.returnToLocal) {
+            shouldSend = true;
+            eventType = '返回本地';
+          } else if (data.enterEdge) {
+            shouldSend = true;
+            eventType = '边缘进入';
+          } else if (data.normalMove) {
+            // 检查是否在跳转状态
+            if (this.inputCapture.edgeState.isTransferred) {
+              // 在跳转状态下，发送普通移动事件给客户端
+              shouldSend = true;
+              eventType = '远程移动';
+            } else {
+              // 本地移动，不发送
+              eventType = '本地移动(跳过)';
+            }
+          }
+
+          if (shouldSend) {
+            console.log(`[服务器] 发送${eventType}: (${data.x}, ${data.y})`);
+            this.networkManager.sendEvent('mouse-move', data);
+          } else {
+            // 每100次移动输出一次，避免日志刷屏
+            if (this.inputCapture.moveCounter % 100 === 0) {
+              console.log(`[服务器] ${eventType}: (${data.x}, ${data.y}) [跳过]`);
+            }
+          }
+        }
       }
     });
 
@@ -231,6 +172,105 @@ class InputLeapApp {
     this.deviceDiscovery.on('device-found', (device) => {
       this.mainWindow.webContents.send('device-found', device);
     });
+  }
+
+  handleRemoteMouseMove(data) {
+    const localBounds = this.inputCapture.screenBounds;
+    let targetX, targetY;
+
+    console.log(`[客户端] 接收到远程鼠标事件:`, data);
+
+    if (data.transferToRemote) {
+      // 跳转事件：服务器鼠标到达边缘，客户端鼠标应该从对应边缘出现
+      console.log(`[客户端] 🚀 服务器从${data.edge}边缘跳转，客户端鼠标出现`);
+
+      const remoteBounds = data.screenBounds;
+      const relativeX = (data.x - remoteBounds.left) / remoteBounds.width;
+      const relativeY = (data.y - remoteBounds.top) / remoteBounds.height;
+
+      switch (data.edge) {
+        case 'left':   // 服务器左边缘 -> 客户端右边缘
+          targetX = localBounds.right - 20;
+          targetY = localBounds.top + (relativeY * localBounds.height);
+          break;
+        case 'right':  // 服务器右边缘 -> 客户端左边缘
+          targetX = localBounds.left + 20;
+          targetY = localBounds.top + (relativeY * localBounds.height);
+          break;
+        case 'top':    // 服务器上边缘 -> 客户端下边缘
+          targetX = localBounds.left + (relativeX * localBounds.width);
+          targetY = localBounds.bottom - 20;
+          break;
+        case 'bottom': // 服务器下边缘 -> 客户端上边缘
+          targetX = localBounds.left + (relativeX * localBounds.width);
+          targetY = localBounds.top + 20;
+          break;
+        default:
+          console.warn(`[客户端] 未知边缘: ${data.edge}`);
+          return;
+      }
+
+      // 确保坐标在有效范围内
+      targetX = Math.max(localBounds.left + 10, Math.min(targetX, localBounds.right - 10));
+      targetY = Math.max(localBounds.top + 10, Math.min(targetY, localBounds.bottom - 10));
+
+      console.log(`[客户端] 🎯 鼠标出现在: (${Math.round(targetX)}, ${Math.round(targetY)})`);
+
+      // 设置客户端状态为"已跳转"
+      this.inputCapture.edgeState.isTransferred = true;
+      this.inputCapture.edgeState.isAtEdge = false;
+
+    } else if (data.normalMove && this.inputCapture.edgeState.isTransferred) {
+      // 普通移动事件：客户端已跳转，接收服务器鼠标移动
+      console.log(`[客户端] 🖱️ 远程鼠标移动: 远程(${data.x}, ${data.y}) -> 本地`);
+
+      // 将远程坐标转换为本地坐标
+      const remoteBounds = data.screenBounds;
+      const scaleX = localBounds.width / remoteBounds.width;
+      const scaleY = localBounds.height / remoteBounds.height;
+
+      targetX = localBounds.left + (data.x - remoteBounds.left) * scaleX;
+      targetY = localBounds.top + (data.y - remoteBounds.top) * scaleY;
+
+      // 确保坐标在有效范围内
+      targetX = Math.max(localBounds.left + 5, Math.min(targetX, localBounds.right - 5));
+      targetY = Math.max(localBounds.top + 5, Math.min(targetY, localBounds.bottom - 5));
+
+    } else if (data.returnToLocal) {
+      // 返回本地事件：服务器鼠标从边缘返回
+      console.log(`[客户端] 🏠 服务器鼠标返回本地，客户端鼠标隐藏`);
+
+      // 将客户端鼠标移到屏幕中心或安全位置
+      targetX = localBounds.left + localBounds.width / 2;
+      targetY = localBounds.top + localBounds.height / 2;
+
+      // 重置客户端状态
+      this.inputCapture.edgeState.isTransferred = false;
+      this.inputCapture.edgeState.isAtEdge = false;
+
+    } else if (data.enterEdge) {
+      // 边缘进入事件：服务器鼠标到达边缘，但还未跳转
+      console.log(`[客户端] 👀 服务器鼠标到达${data.edge}边缘，等待跳转`);
+      // 预处理，暂时不移动鼠标
+      return;
+    } else {
+      // 其他事件暂时忽略
+      console.log(`[客户端] 忽略事件:`, data);
+      return;
+    }
+
+    // 执行鼠标移动
+    if (targetX !== undefined && targetY !== undefined) {
+      console.log(`[客户端] 🎯 移动鼠标到: (${Math.round(targetX)}, ${Math.round(targetY)})`);
+
+      this.inputCapture.moveMouseTo(Math.round(targetX), Math.round(targetY))
+        .then(() => {
+          console.log(`[客户端] ✅ 鼠标移动成功`);
+        })
+        .catch((error) => {
+          console.error(`[客户端] ❌ 鼠标移动失败:`, error);
+        });
+    }
   }
 
   setupIpcHandlers() {

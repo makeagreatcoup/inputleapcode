@@ -31,6 +31,8 @@ class InputLeapUI {
     this.clientTlsEl = document.getElementById('clientTLS');
     this.connectBtnEl = document.getElementById('connectBtn');
     this.disconnectBtnEl = document.getElementById('disconnectBtn');
+    this.serverHistoryEl = document.getElementById('serverHistory'); // 新增IP历史下拉框
+    this.clearHistoryBtnEl = document.getElementById('clearHistoryBtn'); // 新增清除历史按钮
     
     // 设备发现元素
     this.discoverBtnEl = document.getElementById('discoverBtn');
@@ -58,17 +60,21 @@ class InputLeapUI {
     // 服务器模式事件
     this.startServerBtnEl.addEventListener('click', () => this.startServer());
     this.stopServerBtnEl.addEventListener('click', () => this.stopServer());
-    
+
     // 客户端模式事件
     this.connectBtnEl.addEventListener('click', () => this.connectToServer());
     this.disconnectBtnEl.addEventListener('click', () => this.disconnect());
-    
+
+    // IP历史记录事件
+    this.serverHistoryEl.addEventListener('change', () => this.selectFromHistory());
+    this.clearHistoryBtnEl.addEventListener('click', () => this.clearHistory());
+
     // 设备发现事件
     this.discoverBtnEl.addEventListener('click', () => this.discoverDevices());
-    
+
     // 文件传输事件
     this.sendFileBtnEl.addEventListener('click', () => this.sendFiles());
-    
+
     // 设置变更事件
     this.autoTlsEl.addEventListener('change', () => this.updateTlsSettings());
   }
@@ -77,13 +83,16 @@ class InputLeapUI {
     // 获取设备信息
     const deviceInfo = await this.getDeviceInfo();
     this.deviceInfoEl.textContent = `${deviceInfo.platform} - ${deviceInfo.hostname}`;
-    
+
     // 设置默认设备名称
     this.serverNameEl.value = deviceInfo.hostname;
-    
+
     // 初始化连接状态
     this.updateConnectionStatus();
-    
+
+    // 加载IP连接历史
+    this.loadConnectionHistory();
+
     // 加载设置
     this.loadSettings();
   }
@@ -216,6 +225,10 @@ class InputLeapUI {
         this.updateConnectionStatus('connected');
         this.connectBtnEl.classList.add('d-none');
         this.disconnectBtnEl.classList.remove('d-none');
+
+        // 保存成功连接的IP到缓存
+        this.saveConnectionToCache(host, port, this.clientTlsEl.checked);
+
         this.showNotification(`✅ 连接成功: ${host}:${port}`, 'success');
       } else {
         this.updateConnectionStatus('disconnected');
@@ -463,15 +476,142 @@ class InputLeapUI {
       ${message}
       <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     `;
-    
+
     document.body.appendChild(notification);
-    
+
     // 自动移除通知
     setTimeout(() => {
       if (notification.parentNode) {
         notification.parentNode.removeChild(notification);
       }
     }, 5000);
+  }
+
+  // IP连接历史相关功能
+  saveConnectionToCache(host, port, useTLS) {
+    try {
+      // 获取现有历史记录
+      const history = JSON.parse(localStorage.getItem('inputleap-connection-history') || '[]');
+
+      // 创建新的连接记录
+      const newConnection = {
+        host: host,
+        port: port,
+        useTLS: useTLS,
+        lastConnected: new Date().toISOString()
+      };
+
+      // 移除重复记录（相同主机和端口）
+      const filteredHistory = history.filter(conn =>
+        !(conn.host === host && conn.port === port)
+      );
+
+      // 添加新记录到开头
+      filteredHistory.unshift(newConnection);
+
+      // 最多保存10条记录
+      const limitedHistory = filteredHistory.slice(0, 10);
+
+      // 保存到localStorage
+      localStorage.setItem('inputleap-connection-history', JSON.stringify(limitedHistory));
+
+      console.log('✅ IP连接历史已保存:', { host, port, useTLS });
+
+      // 更新下拉框显示
+      this.updateHistoryDropdown();
+
+    } catch (error) {
+      console.error('❌ 保存IP连接历史失败:', error);
+    }
+  }
+
+  loadConnectionHistory() {
+    try {
+      const history = JSON.parse(localStorage.getItem('inputleap-connection-history') || '[]');
+
+      // 更新下拉框
+      this.updateHistoryDropdown(history);
+
+      // 如果有历史记录，默认选择最近的一次连接
+      if (history.length > 0) {
+        const latestConnection = history[0];
+        this.serverHostEl.value = latestConnection.host;
+        this.clientPortEl.value = latestConnection.port;
+        this.clientTlsEl.checked = latestConnection.useTLS;
+      }
+
+      console.log('✅ 已加载IP连接历史:', history.length, '条记录');
+
+    } catch (error) {
+      console.error('❌ 加载IP连接历史失败:', error);
+    }
+  }
+
+  updateHistoryDropdown(history = null) {
+    try {
+      if (!history) {
+        history = JSON.parse(localStorage.getItem('inputleap-connection-history') || '[]');
+      }
+
+      // 清空现有选项（保留默认选项）
+      this.serverHistoryEl.innerHTML = '<option value="">选择历史连接...</option>';
+
+      // 添加历史记录选项
+      history.forEach((conn, index) => {
+        const option = document.createElement('option');
+        option.value = `${conn.host}:${conn.port}:${conn.useTLS ? 'true' : 'false'}`;
+
+        const timeAgo = this.getTimeAgo(new Date(conn.lastConnected));
+        const tlsText = conn.useTLS ? '🔒' : '🔓';
+        option.textContent = `${tlsText} ${conn.host}:${conn.port} (${timeAgo})`;
+
+        this.serverHistoryEl.appendChild(option);
+      });
+
+      // 显示或隐藏清除历史按钮
+      this.clearHistoryBtnEl.style.display = history.length > 0 ? 'block' : 'none';
+
+    } catch (error) {
+      console.error('❌ 更新历史下拉框失败:', error);
+    }
+  }
+
+  selectFromHistory() {
+    const selectedValue = this.serverHistoryEl.value;
+    if (!selectedValue) return;
+
+    const [host, port, tls] = selectedValue.split(':');
+
+    this.serverHostEl.value = host;
+    this.clientPortEl.value = port;
+    this.clientTlsEl.checked = tls === 'true';
+
+    // 重置下拉框选择
+    setTimeout(() => {
+      this.serverHistoryEl.value = '';
+    }, 100);
+
+    this.showNotification(`已选择历史连接: ${host}:${port}`, 'info');
+  }
+
+  clearHistory() {
+    if (confirm('确定要清除所有连接历史记录吗？')) {
+      localStorage.removeItem('inputleap-connection-history');
+      this.updateHistoryDropdown();
+      this.showNotification('连接历史记录已清除', 'success');
+    }
+  }
+
+  getTimeAgo(date) {
+    const now = new Date();
+    const diffInSeconds = Math.floor((now - date) / 1000);
+
+    if (diffInSeconds < 60) return '刚刚';
+    if (diffInSeconds < 3600) return Math.floor(diffInSeconds / 60) + '分钟前';
+    if (diffInSeconds < 86400) return Math.floor(diffInSeconds / 3600) + '小时前';
+    if (diffInSeconds < 2592000) return Math.floor(diffInSeconds / 86400) + '天前';
+
+    return date.toLocaleDateString();
   }
 }
 
